@@ -34,6 +34,10 @@ mesh = Mesh("meshes/"+meshname+".xml")
 cell_function = MeshFunction("size_t", mesh, "meshes/"+meshname+"_physical_region.xml")
 facet_function = MeshFunction("size_t", mesh, "meshes/"+meshname+"_facet_region.xml")
 
+# Define function spaces (P2-P1)
+V = VectorFunctionSpace(mesh, "Lagrange", 2)
+Q = FunctionSpace(mesh, "Lagrange", 1)
+
 # Set parameter values
 dt = float(sys.argv[4])
 Time = float(sys.argv[3])
@@ -80,11 +84,11 @@ er_u = []
 er_u2 = []
 time_erc = 0
 
-
 def computeErr(erlist,velocity):
-    if timelist.last > t : timelist.append(t)
+    if len(timelist)==0 or (timelist[-1] > t) : timelist.append(t)
     terc=toc()
-    erlist.append(errornorm(velocity, solution, norm_type='l2', degree_rise=3))
+    erlist.append(errornorm(velocity, interpolate(solution,V), norm_type='l2', degree_rise=0)) # degree rise?
+    global time_erc
     time_erc += toc() - terc
 
 
@@ -92,10 +96,6 @@ def computeErr(erlist,velocity):
 if str_method=="chorinExpl" :
     info("Initialization of explicite Chorin method")
     tic()
-
-    # Define function spaces (P2-P1)
-    V = VectorFunctionSpace(mesh, "Lagrange", 2)
-    Q = FunctionSpace(mesh, "Lagrange", 1)
 
     # Boundary conditions
     bc0     = DirichletBC(V, noslip, facet_function,1)
@@ -141,9 +141,6 @@ if str_method=="chorinExpl" :
     # Use amg preconditioner if available
     prec = "amg" if has_krylov_solver_preconditioner("amg") else "default"
     info("Preconditioning: " + prec)
-
-    # Create files for storing solution
-    out = output()
 
     # Time-stepping
     info("Running of explicite Chorin method")
@@ -195,11 +192,9 @@ if str_method=="direct" :
     tic()
 
     # Define function spaces (Taylor-Hood)
-    V = VectorFunctionSpace(mesh, "Lagrange", 2)
-    Q = FunctionSpace(mesh, "Lagrange", 1)
     W = MixedFunctionSpace([V,Q])
-    bc0     = DirichletBC(W.sub(0), noslip, facet_function,1)
-    inflow	= DirichletBC(W.sub(0), v_in, facet_function,2)
+    bc0    = DirichletBC(W.sub(0), noslip, facet_function,1)
+    inflow = DirichletBC(W.sub(0), v_in, facet_function,2)
     # Collect boundary conditions
     bcu = [inflow,bc0]
 
@@ -233,15 +228,12 @@ if str_method=="direct" :
     # (var.formulace, neznama, Dir.okrajove podminky, jakobian, optional)
     NS_solver  = NonlinearVariationalSolver(NS_problem)
 
-    #	prm = NS_solver.parameters
+    #prm = NS_solver.parameters
     #prm['newton_solver']['absolute_tolerance'] = 1E-08
     #prm['newton_solver']['relative_tolerance'] = 1E-08
     #prm['newton_solver']['maximum_iterations'] = 45
     #prm['newton_solver']['relaxation_parameter'] = 1.0
     #prm['newton_solver']['linear_solver'] = 'mumps' #or petsc,mumps
-
-    # Create files for storing solution
-    out = output()
 
     # Time-stepping
     info("Running of direct method")

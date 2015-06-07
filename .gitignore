@@ -3,3 +3,4 @@
 *.xdmf
 *.csv
 *.h
+results*
