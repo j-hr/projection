@@ -6,6 +6,9 @@ import sys
 from sympy import I, re, sqrt, exp, symbols, lambdify, besselj
 from scipy.special import jv 
 
+#TODO Chorin - check if not wrong - allways diverge
+#TODO direct - check if not wrong - 0 velocity result
+
 #TODO if method = ... >> if hasTentative
 
 #check number of arguments
@@ -90,8 +93,8 @@ elif (str_type == "pulse0") or (str_type == "pulsePrec") :
 # TODO aternative error control? 
 measure_time = 0.5 if str_type=="steady" else 1 # maybe change
 timelist=[]
-er_u = []
-er_u2 = []
+err_u = []
+err_u2 = []
 time_erc = 0
 
 def computeErr(erlist,velocity):
@@ -167,7 +170,7 @@ if str_method=="chorinExpl" :
         [bc.apply(A1, b1) for bc in bcu]
         solve(A1, u1.vector(), b1, "gmres", "default")
         u2file << u1
-        if t>measure_time : computeErr(er_u2,u1)
+        if t>measure_time : computeErr(err_u2,u1)
         #save DIV
         end()
 
@@ -185,7 +188,7 @@ if str_method=="chorinExpl" :
         [bc.apply(A3, b3) for bc in bcu]
         solve(A3, u1.vector(), b3, "gmres", "default")
         ufile << u1
-        if t>measure_time : computeErr(er_u,u1)
+        if t>measure_time : computeErr(err_u,u1)
         #save DIV
         end()
 
@@ -251,7 +254,7 @@ if str_method=="direct" :
     while t < Time + DOLFIN_EPS:
         print("t = ", t)
         
-        v_in.v=t
+        v_in.t=t
         
         # Compute
         begin("Solving NS ....")
@@ -264,7 +267,7 @@ if str_method=="direct" :
         ufile << u
         #save DIV
         pfile << p
-        if t>measure_time : computeErr(er_u,u)
+        if t>measure_time : computeErr(err_u,u)
 
         # Move to next time step
         assign(u0,u)
@@ -284,10 +287,10 @@ with open("results_"+str_name+"/report_err.csv", 'w') as reportfile:
 
 with open("results_"+str_name+"/report.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportwriter.writerow(["pipe_test"]+[str_type]+[str_method]+[mesh]+[Time]+[dt]+[total-time_erc]+[time_erc])
+    reportwriter.writerow(["pipe_test"]+[str_type]+[str_method]+[meshname]+[mesh]+[Time]+[dt]+[total-time_erc]+[time_erc])
 
 with open("results_"+str_name+"/report_h.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportwriter.writerow(["problem"] + ["type"] + ["method"] + ["meshname"]+ ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"])
-    reportwriter.writerow(["pipe_test"]+[str_type]+[str_method]+[mesh]+[Time]+[dt]+[total-time_erc]+[time_erc]+[total_err_u]+[total_err_u2])
+    reportwriter.writerow(["problem"] + ["type"] + ["method"] + ["meshname"] + ["mesh"]+ ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"])
+    reportwriter.writerow(["pipe_test"]+[str_type]+[str_method]+[meshname]+[mesh]+[Time]+[dt]+[total-time_erc]+[time_erc]+[total_err_u]+[total_err_u2])
 
