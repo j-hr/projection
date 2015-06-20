@@ -4,3 +4,6 @@
 *.csv
 *.h
 results*
+csv
+math
+sys
