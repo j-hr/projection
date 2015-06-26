@@ -1,19 +1,21 @@
 from __future__ import print_function
 from dolfin import *
-import math #TODO add "math."
+import math
 import csv
 import sys
 from sympy import I, re, sqrt, exp, symbols, lambdify, besselj
 from scipy.special import jv 
 
-#TODO Chorin - check if not wrong - allways diverge
-#TODO direct - check if not wrong - 0 velocity result
+#TODO divergence not saving to one time row...  and compute norm
+
+#TODO precomputation of Bessel fc.
 
 #TODO if method = ... >> if hasTentative
 
+
 #check number of arguments
-nargs = 4
-arguments = "method type T dt"
+nargs = 6
+arguments = "method type meshname T dt factor"
 if len(sys.argv) <> nargs+1:
     exit("Wrong number of arguments. Should be: %d (%s)"%(nargs,arguments))
 
@@ -22,6 +24,7 @@ str_method=sys.argv[1]
 
 #choose type of flow:
 #   steady - parabolic profile (0.5 s onset)
+#   steadyslow - parabolic profile (0.5 s onset)
 #Womersley profile (1 s period)
 #   pulse0 - u(0)=0
 #   pulsePrec - u(0) from precomputed solution (steady Stokes problem)
@@ -29,12 +32,12 @@ str_type=sys.argv[2]
 
 # TODO only when needed:
 # Print log messages only from the root process in parallel
-parameters["std_out_all_processes"] = False;
+#parameters["std_out_all_processes"] = False;
 #ffc_options = {"quadrature_degree": 5}
 #parameters["allow_extrapolation"] = True 
 
 # Import gmsh mesh 
-meshname = "cyl_c1"
+meshname = sys.argv[3]
 mesh = Mesh("meshes/"+meshname+".xml")
 cell_function = MeshFunction("size_t", mesh, "meshes/"+meshname+"_physical_region.xml")
 facet_function = MeshFunction("size_t", mesh, "meshes/"+meshname+"_facet_region.xml")
@@ -44,24 +47,31 @@ V = VectorFunctionSpace(mesh, "Lagrange", 2)
 Q = FunctionSpace(mesh, "Lagrange", 1)
 
 # Set parameter values
-dt = float(sys.argv[4])
-Time = float(sys.argv[3])
+dt = float(sys.argv[5])
+Time = float(sys.argv[4])
+factor = float(sys.argv[6]) # default: 1.0
+info("Velocity scale factor = %4.2f"%factor)
+re = 728.761*factor
+info("Computing with Re = %f"%re)
 
 # fixed parameters (used in analytic solution)
 nu = 3.71 #kinematic viscosity
 R=5.0 # cylinder radius
+
+#==precomputation of Bessel functions================================================================================
+# TODO
 
 #==Boundary Conditions================================================================================
 # boundary parts: 1 walls, 2 inflow, 3 outflow
 noslip  = Constant((0.0, 0.0, 0.0))
 #TODO pulsePrec - u(0) from precomputed solution (steady Stokes problem)
 if str_type == "steady" :
-    v_in = Expression(("0.0","0.0","(t<0.5)?((sin(pi*t))*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))):(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"),t=0)
+    v_in = Expression(("0.0","0.0","(t<0.5)?((sin(pi*t))*factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))):(factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1])))"),t=0,factor=factor)
 elif str_type == "pulse0" or  str_type == "pulsePrec" :      
     r,t = symbols('r t')
     u = -43.2592*r**2 + (-11.799 + 0.60076*I)*((0.000735686 - 0.000528035*I)*besselj(0, r*(1.84042 + 1.84042*I)) + 1)*exp(-8*I*pi*t) + (-11.799 - 0.60076*I)*((0.000735686 + 0.000528035*I)*besselj(0, r*(1.84042 - 1.84042*I)) + 1)*exp(8*I*pi*t) + (-26.3758 - 4.65265*I)*(-(0.000814244 - 0.00277126*I)*besselj(0, r*(1.59385 - 1.59385*I)) + 1)*exp(6*I*pi*t) + (-26.3758 + 4.65265*I)*(-(0.000814244 + 0.00277126*I)*besselj(0, r*(1.59385 + 1.59385*I)) + 1)*exp(-6*I*pi*t) + (-51.6771 + 27.3133*I)*(-(0.0110653 - 0.00200668*I)*besselj(0, r*(1.30138 + 1.30138*I)) + 1)*exp(-4*I*pi*t) + (-51.6771 - 27.3133*I)*(-(0.0110653 + 0.00200668*I)*besselj(0, r*(1.30138 - 1.30138*I)) + 1)*exp(4*I*pi*t) + (-33.1594 - 95.2423*I)*((0.0314408 - 0.0549981*I)*besselj(0, r*(0.920212 - 0.920212*I)) + 1)*exp(2*I*pi*t) + (-33.1594 + 95.2423*I)*((0.0314408 + 0.0549981*I)*besselj(0, r*(0.920212 + 0.920212*I)) + 1)*exp(-2*I*pi*t) + 1081.48
     # how this works?
-    u_lambda = lambdify([r,t], u, ['numpy', {'besselj': jv}]) 
+    u_lambda = lambdify([r,t], factor*u, ['numpy', {'besselj': jv}]) 
     class WomersleyProfile(Expression):
         def eval(self, value, x):
             rad = float(sqrt(x[0]*x[0]+x[1]*x[1])) # conversion to float needed, u_lambda (and near) cannot use sympy Float as input
@@ -74,7 +84,7 @@ elif str_type == "pulse0" or  str_type == "pulsePrec" :
 
 #==Output settings====================================================================================
 # Create files for storing solution
-str_name = "pipe_test_"+str_type+"_"+str_method+"_"+meshname+"_%ds_%dms"%(Time,dt*1000)
+str_name = "pipe_test_"+str_type+"_"+str_method+"_"+meshname+"_factor%4.2f_%ds_%dms"%(factor,Time,dt*1000)
 ufile = File("results_"+str_name+"/velocity.xdmf")
 dfile = File("results_"+str_name+"/divergence.xdmf") # maybe just compute norm
 pfile = File("results_"+str_name+"/pressure.xdmf")
@@ -82,9 +92,21 @@ if str_method=="chorinExpl" :
     u2file = File("results_"+str_name+"/velocity_tent.xdmf")
     d2file = File("results_"+str_name+"/div_tent.xdmf") # maybe just compute norm
 
+# method for saving divergence
+D = FunctionSpace(mesh, "Lagrange", 1)
+def savediv(field,divfile):
+    divu = project(div(field), D)
+    divfile << divu
+
+div_u = []
+div_u2 = []
+def computeDiv(divlist,velocity):
+    terc=toc()
+    erlist.append(norm(velocity, 'Hdiv0'))
+
 #==Analytic solution====================================================================================
 if str_type == "steady" :
-    solution = Expression(("0.0","0.0","(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"))
+    solution = Expression(("0.0","0.0","factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"),factor=factor)
 elif (str_type == "pulse0") or (str_type == "pulsePrec") :
     solution = WomersleyProfile()
 
@@ -98,9 +120,9 @@ err_u2 = []
 time_erc = 0
 
 def computeErr(erlist,velocity):
-    if len(timelist)==0 or (timelist[-1] > t) : timelist.append(t)
+    if len(timelist)==0 or (timelist[-1] < t) : timelist.append(round(t,3)) # round timestep to 0.001
     terc=toc()
-    erlist.append(errornorm(velocity, interpolate(solution,V), norm_type='l2', degree_rise=0)) # degree rise?
+    erlist.append(pow(errornorm(velocity, interpolate(solution,V), norm_type='l2', degree_rise=0),2)) # degree rise?
     global time_erc
     time_erc += toc() - terc
 
@@ -171,7 +193,8 @@ if str_method=="chorinExpl" :
         solve(A1, u1.vector(), b1, "gmres", "default")
         u2file << u1
         if t>measure_time : computeErr(err_u2,u1)
-        #save DIV
+        computeDiv(div_u2,u1)
+        savediv(u1,d2file)
         end()
 
         # Pressure correction
@@ -189,7 +212,8 @@ if str_method=="chorinExpl" :
         solve(A3, u1.vector(), b3, "gmres", "default")
         ufile << u1
         if t>measure_time : computeErr(err_u,u1)
-        #save DIV
+        computeDiv(div_u,u1)
+        savediv(u1,dfile)
         end()
 
         # Move to next time step
@@ -265,7 +289,8 @@ if str_method=="direct" :
         (u, p) = w.split()
 
         ufile << u
-        #save DIV
+        savediv(u,dfile)
+        computeDiv(div_u,u)
         pfile << p
         if t>measure_time : computeErr(err_u,u)
 
@@ -279,18 +304,27 @@ if str_method=="direct" :
 #==Report====================================================================================
 total_err_u = math.sqrt(sum(err_u))
 total_err_u2 = math.sqrt(sum(err_u2))
+# report of squares of errornorm for individual timesteps
 with open("results_"+str_name+"/report_err.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
     reportwriter.writerow(timelist)
     reportwriter.writerow(err_u)
     if str_method=="chorinExpl" : reportwriter.writerow(err_u2)
 
+# report of norm of div for individual timesteps
+with open("results_"+str_name+"/report_div.csv", 'w') as reportfile:
+    reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
+    reportwriter.writerow(div_u)
+    if str_method=="chorinExpl" : reportwriter.writerow(div_u2)
+
+# report without header
 with open("results_"+str_name+"/report.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportwriter.writerow(["pipe_test"]+[str_type]+[str_method]+[meshname]+[mesh]+[Time]+[dt]+[total-time_erc]+[time_erc])
+    reportwriter.writerow(["pipe_test"]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc])
 
+# report with header
 with open("results_"+str_name+"/report_h.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportwriter.writerow(["problem"] + ["type"] + ["method"] + ["meshname"] + ["mesh"]+ ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"])
-    reportwriter.writerow(["pipe_test"]+[str_type]+[str_method]+[meshname]+[mesh]+[Time]+[dt]+[total-time_erc]+[time_erc]+[total_err_u]+[total_err_u2])
+    reportwriter.writerow(["problem"] + ["type"] + ["method"] + ["meshname"] + ["mesh"]+["factor"]+ ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"])
+    reportwriter.writerow(["pipe_test"]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc]+[total_err_u]+[total_err_u2])
 
