@@ -19,8 +19,11 @@ arguments = "method type meshname T dt factor"
 if len(sys.argv) <> nargs+1:
     exit("Wrong number of arguments. Should be: %d (%s)"%(nargs,arguments))
 
+print(sys.argv)
+
 #choose a method: direct, chorinExpl
 str_method=sys.argv[1]
+print("Method:       "+str_method)
 
 #choose type of flow:
 #   steady - parabolic profile (0.5 s onset)
@@ -29,6 +32,7 @@ str_method=sys.argv[1]
 #   pulse0 - u(0)=0
 #   pulsePrec - u(0) from precomputed solution (steady Stokes problem)
 str_type=sys.argv[2]
+print("Problem type: "+str_type)
 
 # TODO only when needed:
 # Print log messages only from the root process in parallel
@@ -49,10 +53,11 @@ Q = FunctionSpace(mesh, "Lagrange", 1)
 # Set parameter values
 dt = float(sys.argv[5])
 Time = float(sys.argv[4])
+print("Time:         %d\ndt:          %dms"%(Time,1000*dt))
 factor = float(sys.argv[6]) # default: 1.0
-info("Velocity scale factor = %4.2f"%factor)
+print("Velocity scale factor = %4.2f"%factor)
 re = 728.761*factor
-info("Computing with Re = %f"%re)
+print("Computing with Re = %f"%re)
 
 # fixed parameters (used in analytic solution)
 nu = 3.71 #kinematic viscosity
@@ -94,8 +99,9 @@ if str_method=="chorinExpl" :
 
 # method for saving divergence
 D = FunctionSpace(mesh, "Lagrange", 1)
+divu = Function(D)
 def savediv(field,divfile):
-    divu = project(div(field), D)
+    divu.assign(project(div(field), D))
     divfile << divu
 
 div_u = []
