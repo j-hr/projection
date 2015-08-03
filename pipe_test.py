@@ -9,6 +9,11 @@ from scipy.special import jv
 #TODO if method = ... change to if hasTentative
 #TODO another projection methods (MiroK)
 #TODO pulsePrec type = implement solving of stationary problem
+    # stationary system solved
+    # is result better than pulse0?
+    # not working: direct method does not converge for cyl_c1, dt=0.1
+    # save somehow initial velocity (chorin - which file? both?) (problem: one timeline in Paraview)
+
 #TODO modify onset? (wom)
 
 #Issues
@@ -16,7 +21,11 @@ from scipy.special import jv
 
 #Notes
 # characteristic time for onset ~~ length of pipe/speed of fastest particle = 20(mm) /factor*1081(mm/s) ~~  0.02/factor
-# characteristic time for dt ~~ hmax/speed of fastest particle = hmax/factor*1081(mm/s)
+# characteristic time for dt ~~ hmax/speed of fastest particle = hmax/(factor*1081(mm/s))
+#   h = cuberoot(volume/number of cells):
+#   c1: 829 cells => h = 1.23 mm => 1.1 ms/factor
+#   c2: 6632 cells => h = 0.62 mm => 0.57 ms/factor
+#   c3: 53056 cells => h = 0.31 mm => 0.28 ms/factor
 
 tic()
 #==Resolve input arguments================================================================================================
@@ -30,12 +39,15 @@ if (len(sys.argv) == nargs+2):
 else:
     str_note=""
 
-if sys.argv[7]==0 : doErrControl=False
+if sys.argv[7]=="0" :
+    doErrControl=False
+    print("Error control ommited")
 else:
     doErrControl=True
-    if sys.argv[7]==-1 :
+    if sys.argv[7]=="-1" :
         measure_time = 0.5 if str_type=="steady" else 1 # maybe change
-    else : measure_time = sys.argv[7]
+    else : measure_time = float(sys.argv[7])
+    print("Error control from:       %4.2f s"%(measure_time))
 
 #choose a method: direct, chorinExpl
 str_method=sys.argv[1]
@@ -51,7 +63,7 @@ print("Problem type: "+str_type)
 # Set parameter values
 dt = float(sys.argv[5])
 Time = float(sys.argv[4])
-print("Time:         %d\ndt:           %dms"%(Time,1000*dt))
+print("Time:         %d s\ndt:           %d ms"%(Time,1000*dt))
 factor = float(sys.argv[6]) # default: 1.0
 print("Velocity scale factor = %4.2f"%factor)
 reynolds = 728.761*factor
@@ -127,6 +139,37 @@ elif str_type == "pulse0" or  str_type == "pulsePrec" :
         def value_shape(self):
             return (3,)
     v_in=WomersleyProfile()
+if str_type == "pulsePrec" :   # computes initial velocity as a solution of steady Stokes problem with input velocity v_in
+    begin ("computing initial velocity")
+    t = 0 # used in v_in
+    
+    # Define function spaces (Taylor-Hood)
+    W = MixedFunctionSpace([V,Q])
+    bc0    = DirichletBC(W.sub(0), noslip, facet_function,1)
+    inflow = DirichletBC(W.sub(0), v_in, facet_function,2)
+    # Collect boundary conditions
+    bcu = [inflow,bc0]
+    # Define unknown and test function(s) NS
+    v, q = TestFunctions(W)
+    u, p = TrialFunctions(W)
+    w = Function(W)
+    # Define fields
+    n = FacetNormal(mesh)
+    I = Identity(u.geometric_dimension())    # Identity tensor
+    x = SpatialCoordinate(mesh)
+    # Define steady part of the equation
+    def T(u):
+        return -p*I + 2.0*nu*sym(grad(u))
+
+    # Define variational forms
+    F = (inner(T(u), grad(v)) - q*div(u))*dx
+    solve(lhs(F)==rhs(F), w, bcu) # why this way?
+    # Extract solutions:
+    (u_prec, p_prec) = w.split()
+    end()
+    
+    #plot(u_prec, mode = "glyphs", title="steady solution", interactive=True)
+    #exit()
 
 #==Analytic solution====================================================================================
 if doErrControl :
@@ -135,7 +178,7 @@ if doErrControl :
         solution = interpolate(Expression(("0.0","0.0","factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"),factor=factor),V)
         print("Prepared analytic solution. Time: %f"%(toc()-temp))
     elif (str_type == "pulse0") or (str_type == "pulsePrec") :
-        def solution(t): # returns Womersley solution for time t   
+        def assembleSolution(t): # returns Womersley solution for time t   
             temp=toc()
             solution = Function(V)
             dofs2 = V.sub(2).dofmap().dofs() #gives field of indices corresponding to z axis
@@ -146,7 +189,7 @@ if doErrControl :
                 solution.vector()[dofs2] += -sin(coefs_exp[i]*pi*t)*coefs_i_prec[i].vector().array()
             print("Assembled analytic solution. Time: %f"%(toc()-temp))
             return solution
-    #plot(solution(0.2), mode = "glyphs", title="solution")
+    #plot(assembleSolution(0.2), mode = "glyphs", title="solution")
     #interactive()
     #exit()
     #save solution
@@ -155,7 +198,7 @@ if doErrControl :
     #s= Function(V)
     #while t < Time + DOLFIN_EPS:
         #print("t = ", t)
-        #s.assign(solution(t))
+        #s.assign(assembleSolution(t))
         #f << s
         #t+=dt
     #exit()    
@@ -200,9 +243,9 @@ if doErrControl :
             #erlist.append(pow(errornorm(velocity, solution, norm_type='l2', degree_rise=0),2)) # slower, more reliable
             erlist.append(assemble(inner(velocity-solution,velocity-solution)*dx)) # faster
         elif (str_type == "pulse0") or (str_type == "pulsePrec") :
-            #erlist.append(pow(errornorm(velocity, solution(t), norm_type='l2', degree_rise=0),2)) # degree rise?
-            solution = solution(t)
-            erlist.append(assemble(inner(velocity-solution,velocity-solution*dx))) # faster
+            #erlist.append(pow(errornorm(velocity, assembleSolution(t), norm_type='l2', degree_rise=0),2)) # degree rise?
+            solution = assembleSolution(t)
+            erlist.append(assemble(inner(velocity-solution,velocity-solution)*dx)) # faster
         global time_erc
         terc = toc() - temp
         time_erc += terc
@@ -228,6 +271,8 @@ if str_method=="chorinExpl" :
 
     # Create functions
     u0 = Function(V)
+    if str_type == "pulsePrec" :   
+        assign(u0,u_prec)
     u1 = Function(V)
     p1 = Function(Q)
 
@@ -329,6 +374,8 @@ if str_method=="direct" :
 
     #Define fields for time dependent case
     u0 = Function(V) #velocity from previous time step
+    if str_type == "pulsePrec" :   
+        assign(u0,u_prec)
 
     # Define steady part of the equation
     def T(u):
@@ -388,12 +435,12 @@ total_err_u2 = 0
 if doErrControl : 
     total_err_u = math.sqrt(sum(err_u))
     total_err_u2 = math.sqrt(sum(err_u2))
-    err_u = math.sqrt(err_u)
-    err_u = math.sqrt(err_u2)
+    err_u = [math.sqrt(i) for i in err_u]
+    err_u2 = [math.sqrt(i)   for i in err_u2]
     # report of errornorm for individual timesteps
     with open("results_"+str_name+"/report_err.csv", 'w') as reportfile:
         reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-        reportwriter.writerow("first row times, second corrected velocity, third tentative")
+        reportwriter.writerow(["first row times, second corrected velocity, third tentative"])
         reportwriter.writerow(timelist)
         reportwriter.writerow(err_u)
         if str_method=="chorinExpl" : reportwriter.writerow(err_u2)
