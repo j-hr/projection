@@ -12,7 +12,6 @@ from scipy.special import jv
     # stationary system solved
     # is result better than pulse0?
     # not working: direct method does not converge for cyl_c1, dt=0.1
-    # save somehow initial velocity (chorin - which file? both?) (problem: one timeline in Paraview)
 
 #TODO modify onset? (wom)
 
@@ -20,7 +19,7 @@ from scipy.special import jv
 # mesh.hmax() returns strange values
 
 #Notes
-# characteristic time for onset ~~ length of pipe/speed of fastest particle = 20(mm) /factor*1081(mm/s) ~~  0.02/factor
+# characteristic time for onset ~~ length of pipe/speed of fastest particle = 20(mm) /factor*1081(mm/s) ~~  0.02 s/factor
 # characteristic time for dt ~~ hmax/speed of fastest particle = hmax/(factor*1081(mm/s))
 #   h = cuberoot(volume/number of cells):
 #   c1: 829 cells => h = 1.23 mm => 1.1 ms/factor
@@ -213,7 +212,7 @@ if str_method=="chorinExpl" :
     u2file = File("results_"+str_name+"/velocity_tent.xdmf")
     d2file = File("results_"+str_name+"/div_tent.xdmf") # maybe just compute norm
 
-# method for saving divergence
+# method for saving divergence (ensuring, that it will be one timeline in Paraview)
 D = FunctionSpace(mesh, "Lagrange", 1)
 divu = Function(D)
 def savediv(field,divfile):
@@ -221,6 +220,14 @@ def savediv(field,divfile):
     divu.assign(project(div(field), D))
     divfile << divu
     print("Computed and saved divergence. Time: %f"%(toc()-temp))
+
+# method for saving velocity (ensuring, that it will be one timeline in Paraview)
+vel = Function(V)
+def savevel(field,velfile):
+    temp=toc()
+    vel.assign(field)
+    velfile << vel
+    print("Saved solution. Time: %f"%(toc()-temp))
 
 div_u = []
 div_u2 = []
@@ -273,6 +280,8 @@ if str_method=="chorinExpl" :
     u0 = Function(V)
     if str_type == "pulsePrec" :   
         assign(u0,u_prec)
+    savevel(u0,ufile)
+    savevel(u0,u2file)
     u1 = Function(V)
     p1 = Function(Q)
 
@@ -317,7 +326,7 @@ if str_method=="chorinExpl" :
         b1 = assemble(L1)
         [bc.apply(A1, b1) for bc in bcu]
         solve(A1, u1.vector(), b1, "gmres", "default")
-        u2file << u1
+        savevel(u1,u2file)
         if doErrControl and round(t,3)>=measure_time : computeErr(err_u2,u1,t)
         computeDiv(div_u2,u1)
         savediv(u1,d2file)
@@ -336,7 +345,7 @@ if str_method=="chorinExpl" :
         b3 = assemble(L3)
         [bc.apply(A3, b3) for bc in bcu]
         solve(A3, u1.vector(), b3, "gmres", "default")
-        ufile << u1
+        savevel(u1,ufile)
         if doErrControl and round(t,3)>=measure_time : computeErr(err_u,u1,t)
         computeDiv(div_u,u1)
         savediv(u1,dfile)
@@ -371,11 +380,17 @@ if str_method=="direct" :
     I = Identity(u.geometric_dimension())    # Identity tensor
     x = SpatialCoordinate(mesh)
     theta = 0.5 #Crank-Nicholson
-
+    
+    # to assign solution in space W.sub(0) to Function(V) we need FunctionAssigner (cannot be assigned directly)
+    fa=FunctionAssigner(V,W.sub(0))
+    velSp = Function(V)
+    
     #Define fields for time dependent case
     u0 = Function(V) #velocity from previous time step
     if str_type == "pulsePrec" :   
         assign(u0,u_prec)
+    savevel(u0,ufile)
+
 
     # Define steady part of the equation
     def T(u):
@@ -416,7 +431,8 @@ if str_method=="direct" :
         # Extract solutions:
         (u, p) = w.split()
 
-        ufile << u
+        fa.assign(velSp,u) # we are assigning twice (now and inside savevel), but it works with one method savevel for direct and projection (we can split savevel to save one assign)
+        savevel(velSp,ufile)
         savediv(u,dfile)
         computeDiv(div_u,u)
         pfile << p
