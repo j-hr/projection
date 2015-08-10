@@ -2,6 +2,7 @@
 *.pyc
 *.xdmf
 *.csv
+*.ods
 *.h5
 *.h
 results*

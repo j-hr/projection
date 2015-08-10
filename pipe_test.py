@@ -38,16 +38,6 @@ if (len(sys.argv) == nargs+2):
 else:
     str_note=""
 
-if sys.argv[7]=="0" :
-    doErrControl=False
-    print("Error control ommited")
-else:
-    doErrControl=True
-    if sys.argv[7]=="-1" :
-        measure_time = 0.5 if str_type=="steady" else 1 # maybe change
-    else : measure_time = float(sys.argv[7])
-    print("Error control from:       %4.2f s"%(measure_time))
-
 #choose a method: direct, chorinExpl
 str_method=sys.argv[1]
 print("Method:       "+str_method)
@@ -58,6 +48,16 @@ print("Method:       "+str_method)
 #   pulsePrec - u(0) from precomputed solution (steady Stokes problem)
 str_type=sys.argv[2]
 print("Problem type: "+str_type)
+
+if sys.argv[7]=="0" :
+    doErrControl=False
+    print("Error control ommited")
+else:
+    doErrControl=True
+    if sys.argv[7]=="-1" :
+        measure_time = 0.5 if str_type=="steady" else 1 # maybe change
+    else : measure_time = float(sys.argv[7])
+    print("Error control from:       %4.2f s"%(measure_time))
 
 # Set parameter values
 dt = float(sys.argv[5])
@@ -174,6 +174,7 @@ if str_type == "pulsePrec" :   # computes initial velocity as a solution of stea
 if doErrControl :
     temp=toc()
     if str_type == "steady" :
+        global solution
         solution = interpolate(Expression(("0.0","0.0","factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"),factor=factor),V)
         print("Prepared analytic solution. Time: %f"%(toc()-temp))
     elif (str_type == "pulse0") or (str_type == "pulsePrec") :
@@ -236,6 +237,10 @@ def computeDiv(divlist,velocity):
     divlist.append(norm(velocity, 'Hdiv0'))
     print("Computed norm of divergence. Time: %f"%(toc()-temp))
 
+def reportFail():
+    f = open(sys.argv[8]+"_factor%4.2f_step_%dms_failed_at_%5.3f.report"%(factor,dt*1000,t),"w")
+    f.close()
+
 #==Error control====================================================================================
 time_erc=0  # total time spent on measuring error
 if doErrControl : 
@@ -251,8 +256,8 @@ if doErrControl :
             erlist.append(assemble(inner(velocity-solution,velocity-solution)*dx)) # faster
         elif (str_type == "pulse0") or (str_type == "pulsePrec") :
             #erlist.append(pow(errornorm(velocity, assembleSolution(t), norm_type='l2', degree_rise=0),2)) # degree rise?
-            solution = assembleSolution(t)
-            erlist.append(assemble(inner(velocity-solution,velocity-solution)*dx)) # faster
+            sol = assembleSolution(t) # name must be different than solution - solution must be treated as global
+            erlist.append(assemble(inner(velocity-sol,velocity-sol)*dx)) # faster
         global time_erc
         terc = toc() - temp
         time_erc += terc
@@ -325,7 +330,11 @@ if str_method=="chorinExpl" :
         begin("Computing tentative velocity")
         b1 = assemble(L1)
         [bc.apply(A1, b1) for bc in bcu]
-        solve(A1, u1.vector(), b1, "gmres", "default")
+        try:
+            solve(A1, u1.vector(), b1, "gmres", "default")
+        except RuntimeError:
+            reportFail()
+            exit()
         savevel(u1,u2file)
         if doErrControl and round(t,3)>=measure_time : computeErr(err_u2,u1,t)
         computeDiv(div_u2,u1)
@@ -336,7 +345,11 @@ if str_method=="chorinExpl" :
         begin("Computing pressure correction")
         b2 = assemble(L2)
         [bc.apply(A2, b2) for bc in bcp]
-        solve(A2, p1.vector(), b2, "cg", prec)
+        try:
+            solve(A2, p1.vector(), b2, "cg", prec)
+        except RuntimeError:
+            reportFail()
+            exit()
         pfile << p1
         end()
 
@@ -344,7 +357,11 @@ if str_method=="chorinExpl" :
         begin("Computing velocity correction")
         b3 = assemble(L3)
         [bc.apply(A3, b3) for bc in bcu]
-        solve(A3, u1.vector(), b3, "gmres", "default")
+        try:
+            solve(A3, u1.vector(), b3, "gmres", "default")
+        except RuntimeError:
+            reportFail()
+            exit()
         savevel(u1,ufile)
         if doErrControl and round(t,3)>=measure_time : computeErr(err_u,u1,t)
         computeDiv(div_u,u1)
@@ -425,7 +442,11 @@ if str_method=="direct" :
         
         # Compute
         begin("Solving NS ....")
-        NS_solver.solve()
+        try:
+            NS_solver.solve()
+        except RuntimeError:
+            reportFail()
+            exit()
         end()
 
         # Extract solutions:
