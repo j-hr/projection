@@ -5,6 +5,7 @@ import csv
 import sys
 from sympy import I, re, im, sqrt, exp, symbols, lambdify, besselj
 from scipy.special import jv 
+import traceback
 
 #TODO if method = ... change to if hasTentative
 #TODO another projection methods (MiroK)
@@ -34,7 +35,7 @@ arguments = "method type meshname T dt(minimal: 0.001) factor errorcontrol_start
 if not ((len(sys.argv) == nargs+1) or (len(sys.argv) == nargs+2)):
     exit("Wrong number of arguments. Should be: %d (%s)"%(nargs,arguments))
 if (len(sys.argv) == nargs+2):
-    str_note = "_"+sys.argv[8]
+    str_note = sys.argv[8]
 else:
     str_note=""
 
@@ -205,7 +206,7 @@ if doErrControl :
 
 #==Output settings====================================================================================
 # Create files for storing solution
-str_name = "pipe_test_"+str_type+"_"+str_method+"_"+meshname+"_factor%4.2f_%ds_%dms%s"%(factor,Time,dt*1000,str_note)
+str_name = "pipe_test_"+str_type+"_"+str_method+"_"+meshname+"_factor%4.2f_%ds_%dms_%s"%(factor,Time,dt*1000,str_note)
 ufile = File("results_"+str_name+"/velocity.xdmf")
 dfile = File("results_"+str_name+"/divergence.xdmf") # maybe just compute norm
 pfile = File("results_"+str_name+"/pressure.xdmf")
@@ -237,8 +238,12 @@ def computeDiv(divlist,velocity):
     divlist.append(norm(velocity, 'Hdiv0'))
     print("Computed norm of divergence. Time: %f"%(toc()-temp))
 
-def reportFail():
-    f = open(sys.argv[8]+"_factor%4.2f_step_%dms_failed_at_%5.3f.report"%(factor,dt*1000,t),"w")
+def reportFail(inst):
+    print("Runtime error:", sys.exc_info()[1])
+    print("Traceback:")
+    traceback.print_tb(sys.exc_info()[2])
+    f = open(str_note+"_factor%4.2f_step_%dms_failed_at_%5.3f.report"%(factor,dt*1000,t),"w")
+    f.write(traceback.format_exc())
     f.close()
 
 #==Error control====================================================================================
@@ -332,8 +337,8 @@ if str_method=="chorinExpl" :
         [bc.apply(A1, b1) for bc in bcu]
         try:
             solve(A1, u1.vector(), b1, "gmres", "default")
-        except RuntimeError:
-            reportFail()
+        except RuntimeError as inst:
+            reportFail(inst)
             exit()
         savevel(u1,u2file)
         if doErrControl and round(t,3)>=measure_time : computeErr(err_u2,u1,t)
@@ -347,8 +352,8 @@ if str_method=="chorinExpl" :
         [bc.apply(A2, b2) for bc in bcp]
         try:
             solve(A2, p1.vector(), b2, "cg", prec)
-        except RuntimeError:
-            reportFail()
+        except RuntimeError as inst:
+            reportFail(inst)
             exit()
         pfile << p1
         end()
@@ -359,8 +364,8 @@ if str_method=="chorinExpl" :
         [bc.apply(A3, b3) for bc in bcu]
         try:
             solve(A3, u1.vector(), b3, "gmres", "default")
-        except RuntimeError:
-            reportFail()
+        except RuntimeError as inst:
+            reportFail(inst)
             exit()
         savevel(u1,ufile)
         if doErrControl and round(t,3)>=measure_time : computeErr(err_u,u1,t)
@@ -444,8 +449,8 @@ if str_method=="direct" :
         begin("Solving NS ....")
         try:
             NS_solver.solve()
-        except RuntimeError:
-            reportFail()
+        except RuntimeError as inst:
+            reportFail(inst)
             exit()
         end()
 
@@ -477,25 +482,28 @@ if doErrControl :
     # report of errornorm for individual timesteps
     with open("results_"+str_name+"/report_err.csv", 'w') as reportfile:
         reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-        reportwriter.writerow(["first row times, second corrected velocity, third tentative"])
-        reportwriter.writerow(timelist)
-        reportwriter.writerow(err_u)
-        if str_method=="chorinExpl" : reportwriter.writerow(err_u2)
+        reportwriter.writerow(["name"]+["time"]+timelist)
+        reportwriter.writerow([str_note]+["corrected"]+err_u)
+        if str_method=="chorinExpl" : reportwriter.writerow([str_note]+["tentative"]+err_u2)
 
 # report of norm of div for individual timesteps
 with open("results_"+str_name+"/report_div.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportwriter.writerow(div_u)
-    if str_method=="chorinExpl" : reportwriter.writerow(div_u2)
+    reportwriter.writerow([str_note]+["corrected"]+div_u)
+    if str_method=="chorinExpl" : reportwriter.writerow([str_note]+["tentative"]+div_u2)
 
 # report without header
 with open("results_"+str_name+"/report.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportwriter.writerow(["pipe_test"]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc])
+    reportwriter.writerow(["pipe_test"]+[str_note]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc])
 
 # report with header
 with open("results_"+str_name+"/report_h.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportwriter.writerow(["problem"] + ["type"] + ["method"] + ["meshname"] + ["mesh"]+["factor"]+ ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"])
-    reportwriter.writerow(["pipe_test"]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc]+[total_err_u]+[total_err_u2])
+    reportwriter.writerow(["problem"] + ["name"]+["type"] + ["method"] + ["meshname"] + ["mesh"]+["factor"]+ ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"])
+    reportwriter.writerow(["pipe_test"]+[str_note]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc]+[total_err_u]+[total_err_u2])
+
+# create file showing all was done well
+f = open(str_note+"_factor%4.2f_step_%dms_OK"%(factor,dt*1000),"w")
+f.close()
 
