@@ -504,6 +504,6 @@ with open("results_"+str_name+"/report_h.csv", 'w') as reportfile:
     reportwriter.writerow(["pipe_test"]+[str_note]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc]+[total_err_u]+[total_err_u2])
 
 # create file showing all was done well
-f = open(str_note+"_factor%4.2f_step_%dms_OK"%(factor,dt*1000),"w")
+f = open(str_note+"_factor%4.2f_step_%dms_OK.report"%(factor,dt*1000),"w")
 f.close()
 
