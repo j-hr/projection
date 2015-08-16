@@ -206,13 +206,13 @@ if doErrControl :
 
 #==Output settings====================================================================================
 # Create files for storing solution
-str_name = "pipe_test_"+str_type+"_"+str_method+"_"+meshname+"_factor%4.2f_%ds_%dms_%s"%(factor,Time,dt*1000,str_note)
-ufile = File("results_"+str_name+"/velocity.xdmf")
-dfile = File("results_"+str_name+"/divergence.xdmf") # maybe just compute norm
-pfile = File("results_"+str_name+"/pressure.xdmf")
+str_dir_name = str_note+"results_"+str_type+"_"+str_method+"_"+meshname+"_factor%4.2f_%ds_%dms"%(factor,Time,dt*1000)
+ufile = File(str_dir_name+"/velocity.xdmf")
+dfile = File(str_dir_name+"/divergence.xdmf") # maybe just compute norm
+pfile = File(str_dir_name+"/pressure.xdmf")
 if str_method=="chorinExpl" : 
-    u2file = File("results_"+str_name+"/velocity_tent.xdmf")
-    d2file = File("results_"+str_name+"/div_tent.xdmf") # maybe just compute norm
+    u2file = File(str_dir_name+"/velocity_tent.xdmf")
+    d2file = File(str_dir_name+"/div_tent.xdmf") # maybe just compute norm
 
 # method for saving divergence (ensuring, that it will be one timeline in Paraview)
 D = FunctionSpace(mesh, "Lagrange", 1)
@@ -474,34 +474,38 @@ if str_method=="direct" :
 #==Report====================================================================================
 total_err_u = 0 
 total_err_u2 = 0
+avg_err_u = 0 
+avg_err_u2 = 0 
 if doErrControl : 
     total_err_u = math.sqrt(sum(err_u))
     total_err_u2 = math.sqrt(sum(err_u2))
+    avg_err_u = total_err_u/math.sqrt(len(timelist))
+    avg_err_u2 = total_err_u2/math.sqrt(len(timelist)) 
     err_u = [math.sqrt(i) for i in err_u]
     err_u2 = [math.sqrt(i)   for i in err_u2]
     # report of errornorm for individual timesteps
-    with open("results_"+str_name+"/report_err.csv", 'w') as reportfile:
+    with open(str_dir_name+"/report_err.csv", 'w') as reportfile:
         reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
         reportwriter.writerow(["name"]+["time"]+timelist)
         reportwriter.writerow([str_note]+["corrected"]+err_u)
         if str_method=="chorinExpl" : reportwriter.writerow([str_note]+["tentative"]+err_u2)
 
 # report of norm of div for individual timesteps
-with open("results_"+str_name+"/report_div.csv", 'w') as reportfile:
+with open(str_dir_name+"/report_div.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
     reportwriter.writerow([str_note]+["corrected"]+div_u)
     if str_method=="chorinExpl" : reportwriter.writerow([str_note]+["tentative"]+div_u2)
 
 # report without header
-with open("results_"+str_name+"/report.csv", 'w') as reportfile:
+with open(str_dir_name+"/report.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportwriter.writerow(["pipe_test"]+[str_note]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc])
+    reportwriter.writerow(["pipe_test"]+[str_note]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc]+[time_erc]+[total_err_u]+[total_err_u2]+[avg_err_u]+[avg_err_u2])
 
 # report with header
-with open("results_"+str_name+"/report_h.csv", 'w') as reportfile:
+with open(str_dir_name+"/report_h.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportwriter.writerow(["problem"] + ["name"]+["type"] + ["method"] + ["meshname"] + ["mesh"]+["factor"]+ ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"])
-    reportwriter.writerow(["pipe_test"]+[str_note]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc]+[total_err_u]+[total_err_u2])
+    reportwriter.writerow(["problem"] + ["name"]+["type"] + ["method"] + ["meshname"] + ["mesh"]+["factor"]+ ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"]+["avg_err_u"]+["avg_err_u2"])
+    reportwriter.writerow(["pipe_test"]+[str_note]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc]+[total_err_u]+[total_err_u2]+[avg_err_u]+[avg_err_u2])
 
 # create file showing all was done well
 f = open(str_note+"_factor%4.2f_step_%dms_OK.report"%(factor,dt*1000),"w")
