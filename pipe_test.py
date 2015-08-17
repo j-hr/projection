@@ -430,9 +430,9 @@ if str_method=="direct" :
     # (var.formulace, neznama, Dir.okrajove podminky, jakobian, optional)
     NS_solver  = NonlinearVariationalSolver(NS_problem)
 
-    #prm = NS_solver.parameters
-    #prm['newton_solver']['absolute_tolerance'] = 1E-08
-    #prm['newton_solver']['relative_tolerance'] = 1E-08
+    prm = NS_solver.parameters
+    prm['newton_solver']['absolute_tolerance'] = 1E-08
+    prm['newton_solver']['relative_tolerance'] = 1E-08
     #prm['newton_solver']['maximum_iterations'] = 45
     #prm['newton_solver']['relaxation_parameter'] = 1.0
     #prm['newton_solver']['linear_solver'] = 'mumps' #or petsc,mumps
@@ -476,13 +476,38 @@ total_err_u = 0
 total_err_u2 = 0
 avg_err_u = 0 
 avg_err_u2 = 0 
+last_cycle_err_u = 0
+last_cycle_err_u2 = 0
+last_cycle_div = 0
+last_cycle_div2 = 0
+last_cycle_err_min = 0
+last_cycle_err_max = 0
+last_cycle_err_min2 = 0
+last_cycle_err_max2 = 0
 if doErrControl : 
     total_err_u = math.sqrt(sum(err_u))
     total_err_u2 = math.sqrt(sum(err_u2))
     avg_err_u = total_err_u/math.sqrt(len(timelist))
     avg_err_u2 = total_err_u2/math.sqrt(len(timelist)) 
+    if Time>=measure_time+1-DOLFIN_EPS :
+        N=1.0/dt
+        N0 = int(round(len(timelist)-N))
+        N1 = int(round(len(timelist)))
+        #last_cycle = timelist[N0:N1]
+        #print("N: ",N," len: ",len(last_cycle), " list: ",last_cycle)
+        last_cycle_err_u = math.sqrt(sum(err_u[N0:N1])/N)
+        last_cycle_div = math.sqrt(sum(div_u[N0:N1])/N)
+        last_cycle_err_min = math.sqrt(min(err_u[N0:N1]))
+        last_cycle_err_max = math.sqrt(max(err_u[N0:N1]))
+        if str_method=="chorinExpl" :
+            last_cycle_err_u2 = math.sqrt(sum(err_u2[N0:N1])/N)
+            last_cycle_div2 = math.sqrt(sum(div_u2[N0:N1])/N)
+            last_cycle_err_min2 = math.sqrt(min(err_u2[N0:N1]))
+            last_cycle_err_max2 = math.sqrt(max(err_u2[N0:N1]))
+            
     err_u = [math.sqrt(i) for i in err_u]
     err_u2 = [math.sqrt(i)   for i in err_u2]
+    
     # report of errornorm for individual timesteps
     with open(str_dir_name+"/report_err.csv", 'w') as reportfile:
         reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
@@ -499,13 +524,13 @@ with open(str_dir_name+"/report_div.csv", 'w') as reportfile:
 # report without header
 with open(str_dir_name+"/report.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportwriter.writerow(["pipe_test"]+[str_note]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc]+[time_erc]+[total_err_u]+[total_err_u2]+[avg_err_u]+[avg_err_u2])
+    reportwriter.writerow(["pipe_test"]+[str_note]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc]+[time_erc]+[total_err_u]+[total_err_u2]+[avg_err_u]+[avg_err_u2]+[last_cycle_err_u]+[last_cycle_err_u2]+[last_cycle_div]+[last_cycle_div2]+[last_cycle_err_min]+[last_cycle_err_max]+[last_cycle_err_min2]+[last_cycle_err_max2])
 
 # report with header
 with open(str_dir_name+"/report_h.csv", 'w') as reportfile:
     reportwriter = csv.writer(reportfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportwriter.writerow(["problem"] + ["name"]+["type"] + ["method"] + ["meshname"] + ["mesh"]+["factor"]+ ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"]+["avg_err_u"]+["avg_err_u2"])
-    reportwriter.writerow(["pipe_test"]+[str_note]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc]+[total_err_u]+[total_err_u2]+[avg_err_u]+[avg_err_u2])
+    reportwriter.writerow(["problem"] + ["name"]+["type"] + ["method"] + ["meshname"] + ["mesh"]+["factor"]+ ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"]+["avg_err_u"]+["avg_err_u2"]+["last_cycle_err_u"]+["last_cycle_err_u2"]+["last_cycle_div"]+["last_cycle_div2"]+["last_cycle_err_min"]+["last_cycle_err_max"]+["last_cycle_err_min2"]+["last_cycle_err_max2"])
+    reportwriter.writerow(["pipe_test"]+[str_note]+[str_type]+[str_method]+[meshname]+[mesh]+[factor]+[Time]+[dt]+[total-time_erc]+[time_erc]+[total_err_u]+[total_err_u2]+[avg_err_u]+[avg_err_u2]+[last_cycle_err_u]+[last_cycle_err_u2]+[last_cycle_div]+[last_cycle_div2]+[last_cycle_err_min]+[last_cycle_err_max]+[last_cycle_err_min2]+[last_cycle_err_max2])
 
 # create file showing all was done well
 f = open(str_note+"_factor%4.2f_step_%dms_OK.report"%(factor,dt*1000),"w")
