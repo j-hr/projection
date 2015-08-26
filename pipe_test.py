@@ -8,10 +8,18 @@ from sympy import I, re, im, sqrt, exp, symbols, lambdify, besselj
 from scipy.special import jv
 import traceback
 
-# TODO ? load precomputed solutions from files (to save hours of cputime)
+# Reduce HDD usage
+# TODO IF NEEDED option to set which steps to save (for example save only (t mod 0.05) == 0 )
 
-# TODO if method == ... change to if hasTentative
+# Reorganize code
+# TODO Move to multiple files
+
+# Continue work
 # TODO another projection methods (MiroK)
+#   ipc0
+#   ipc2
+#   rotational scheme
+# TODO if method == ... change to if hasTentative
 
 # Issues
 # TODO cyl3 cannot be solved directly, pulsePrec also fails. try mumps, then paralelize
@@ -97,56 +105,25 @@ PS = FunctionSpace(mesh, "Lagrange", 2)  # partial solution (must be same order 
 nu = 3.71  # kinematic viscosity
 R = 5.0  # cylinder radius
 
-# MOVE#==precomputation of Bessel functions=============================================================================
+# load precomputed Bessel functions=====================================================================================
+f = HDF5File(mpi_comm_world(), 'precomputed/precomputed_'+meshName+'.hdf5', 'r')
 if doErrControl:
     if str_type == "pulse0" or str_type == "pulsePrec":
         temp = toc()
-        coefs_mult = [(-11.799 + 0.60076 * I), (-11.799 - 0.60076 * I), (-26.3758 - 4.65265 * I),
-                      (-26.3758 + 4.65265 * I), (-51.6771 + 27.3133 * I), (-51.6771 - 27.3133 * I),
-                      (-33.1594 - 95.2423 * I), (-33.1594 + 95.2423 * I)]
-        coefs_bes_mult = [(0.000735686 - 0.000528035 * I), (0.000735686 + 0.000528035 * I),
-                          -(0.000814244 - 0.00277126 * I), -(0.000814244 + 0.00277126 * I),
-                          -(0.0110653 - 0.00200668 * I), -(0.0110653 + 0.00200668 * I), (0.0314408 - 0.0549981 * I),
-                          (0.0314408 + 0.0549981 * I)]
-        coefs_bes = [(1.84042 + 1.84042 * I), (1.84042 - 1.84042 * I), (1.59385 - 1.59385 * I), (1.59385 + 1.59385 * I),
-                     (1.30138 + 1.30138 * I), (1.30138 - 1.30138 * I), (0.920212 - 0.920212 * I),
-                     (0.920212 + 0.920212 * I)]
-        coefs_exp = [-8, 8, 6, -6, -4, 4, 2, -2]
         coefs_r_prec = []  # these will be functions in PS
         coefs_i_prec = []  # these will be functions in PS
-        c0ex = Expression("factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))", factor=factor)
-        c0_prec = (interpolate(c0ex, PS))
+        fce = Function(PS)
+        f.read(fce,"parab")
+        c0_prec = Function(fce)
         for i in range(8):
-            r = symbols('r')
-            besRe = re(factor * coefs_mult[i] * (coefs_bes_mult[i] * besselj(0, r * coefs_bes[i]) + 1))
-            besIm = im(factor * coefs_mult[i] * (coefs_bes_mult[i] * besselj(0, r * coefs_bes[i]) + 1))
-            besRe_lambda = lambdify(r, besRe, ['numpy', {'besselj': jv}])
-            besIm_lambda = lambdify(r, besIm, ['numpy', {'besselj': jv}])
-
-
-            class PartialReSolution(Expression):
-                def eval(self, value, x):
-                    rad = float(sqrt(x[0] * x[0] + x[1] * x[
-                        1]))  # conversion to float needed, u_lambda (and near) cannot use sympy Float as input
-                    value[0] = 0 if near(rad, R) else besRe_lambda(rad)  # do not evaluate on boundaries, it's 0
-                    # print(value) gives reasonable values
-
-
-            expr = PartialReSolution()
-            coefs_r_prec.append(interpolate(expr, PS))
-
-
-            class PartialImSolution(Expression):
-                def eval(self, value, x):
-                    rad = float(sqrt(x[0] * x[0] + x[1] * x[
-                        1]))  # conversion to float needed, u_lambda (and near) cannot use sympy Float as input
-                    value = 0 if near(rad, R) else besIm_lambda(rad)  # do not evaluate on boundaries, it's 0
-
-
-            expr = PartialImSolution()
-            coefs_i_prec.append(interpolate(expr, PS))
-        # plot(coefs_r_prec[2],title="coefs_r_prec") #reasonable values
-        print("Precomputed partial solution functions. Time: %f" % (toc() - temp))
+            f.read(fce, "real%d" % i)
+            coefs_r_prec.append(Function(fce))
+            f.read(fce, "imag%d" % i)
+            coefs_i_prec.append(Function(fce))
+            # plot(coefs_r_prec[i], title="coefs_r_prec", interactive=True) # reasonable values
+            # plot(coefs_i_prec[i], title="coefs_i_prec", interactive=True) # reasonable values
+        # plot(c0_prec,title="c0_prec",interactive=True)
+        print("Loaded partial solution functions. Time: %f" % (toc() - temp))
 
 # MOVE#==Boundary Conditions================================================================================
 # boundary parts: 1 walls, 2 inflow, 3 outflow
@@ -214,11 +191,9 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     I = Identity(u.geometric_dimension())  # Identity tensor
     x = SpatialCoordinate(mesh)
 
-
     # Define steady part of the equation
     def T(u):
         return -p * I + 2.0 * nu * sym(grad(u))
-
 
     # Define variational forms
     F = (inner(T(u), grad(v)) - q * div(u)) * dx
@@ -245,30 +220,33 @@ if doErrControl:
             sol = Function(V)
             dofs2 = V.sub(2).dofmap().dofs()  # gives field of indices corresponding to z axis
             sol.assign(Constant(("0.0", "0.0", "0.0")))
-            sol.vector()[dofs2] = c0_prec.vector()  # parabolic part of sol
+            sol.vector()[dofs2] = factor * c0_prec.vector().array()  # parabolic part of sol
+            coefs_exp = [-8, 8, 6, -6, -4, 4, 2, -2]
             for idx in range(8):  # add modes of Womersley sol
-                sol.vector()[dofs2] += cos(coefs_exp[idx] * pi * t) * coefs_r_prec[idx].vector().array()
-                sol.vector()[dofs2] += -sin(coefs_exp[idx] * pi * t) * coefs_i_prec[idx].vector().array()
+                sol.vector()[dofs2] += factor * cos(coefs_exp[idx] * pi * t) * coefs_r_prec[idx].vector().array()
+                sol.vector()[dofs2] += factor * -sin(coefs_exp[idx] * pi * t) * coefs_i_prec[idx].vector().array()
             print("Assembled analytic solution. Time: %f" % (toc() - tmp))
             return sol
-            # plot(assembleSolution(0.2), mode = "glyphs", title="sol")
-            # interactive()
-            # exit()
-            # save solution
-            # f=File("sol.xdmf")
-            # t = dt
-            # s= Function(V)
-            # while t < Time + DOLFIN_EPS:
-            # print("t = ", t)
-            # s.assign(assembleSolution(t))
-            # f << s
-            # t+=dt
-            # exit()
+
+        # plot(assembleSolution(0.0), mode = "glyphs", title="sol")
+        # interactive()
+        # exit()
+        # save solution
+        # f=File("sol.xdmf")
+        # t = dt
+        # s= Function(V)
+        # while t < Time + DOLFIN_EPS:
+        # print("t = ", t)
+        # s.assign(assembleSolution(t))
+        # f << s
+        # t+=dt
+        # exit()
 
 # Output settings=======================================================================================================
 # Create files for storing solution
 str_dir_name = str_name + "results_" + str_type + "_" + str_method + "_" + meshName + "_factor%4.2f_%ds_%dms" % (
     factor, time, dt * 1000)
+# create directory, needed because of using "with open(..." construction later
 if not os.path.exists(str_dir_name):
     os.mkdir(str_dir_name)
 if doSave:
