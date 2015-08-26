@@ -9,3 +9,5 @@ results*
 csv
 math
 sys
+*.report
+.idea*
