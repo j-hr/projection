@@ -8,10 +8,10 @@ from sympy import I, re, im, sqrt, exp, symbols, lambdify, besselj
 from scipy.special import jv
 import traceback
 
-# TODO if method = ... change to if hasTentative
-# TODO another projection methods (MiroK)
+# TODO ? load precomputed solutions from files (to save hours of cputime)
 
-# TODO modify onset? (wom)
+# TODO if method == ... change to if hasTentative
+# TODO another projection methods (MiroK)
 
 # Issues
 # TODO cyl3 cannot be solved directly, pulsePrec also fails. try mumps, then paralelize
@@ -40,10 +40,13 @@ str_name = sys.argv[9]
 # save mode
 #   save: create .xdmf files with velocity, pressure, divergence
 #   noSave: do not create .xdmf files with velocity, pressure, divergence
+doSave = False
 if sys.argv[8] == 'save':
     doSave = True
+    print('Saving solution ON.')
 elif sys.argv[8] == 'noSave':
     doSave = False
+    print('Saving solution OFF.')
 else:
     exit('Wrong parameter save_results.')
 
@@ -237,22 +240,22 @@ if doErrControl:
             Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"), factor=factor), V)
         print("Prepared analytic solution. Time: %f" % (toc() - temp))
     elif (str_type == "pulse0") or (str_type == "pulsePrec"):
-        def assembleSolution(t):  # returns Womersley solution for time t
+        def assembleSolution(t):  # returns Womersley sol for time t
             tmp = toc()
-            solution = Function(V)
+            sol = Function(V)
             dofs2 = V.sub(2).dofmap().dofs()  # gives field of indices corresponding to z axis
-            solution.assign(Constant(("0.0", "0.0", "0.0")))
-            solution.vector()[dofs2] = c0_prec.vector()  # parabolic part of solution
-            for i in range(8):  # add modes of Womersley solution
-                solution.vector()[dofs2] += cos(coefs_exp[i] * pi * t) * coefs_r_prec[i].vector().array()
-                solution.vector()[dofs2] += -sin(coefs_exp[i] * pi * t) * coefs_i_prec[i].vector().array()
+            sol.assign(Constant(("0.0", "0.0", "0.0")))
+            sol.vector()[dofs2] = c0_prec.vector()  # parabolic part of sol
+            for idx in range(8):  # add modes of Womersley sol
+                sol.vector()[dofs2] += cos(coefs_exp[idx] * pi * t) * coefs_r_prec[idx].vector().array()
+                sol.vector()[dofs2] += -sin(coefs_exp[idx] * pi * t) * coefs_i_prec[idx].vector().array()
             print("Assembled analytic solution. Time: %f" % (toc() - tmp))
-            return solution
-            # plot(assembleSolution(0.2), mode = "glyphs", title="solution")
+            return sol
+            # plot(assembleSolution(0.2), mode = "glyphs", title="sol")
             # interactive()
             # exit()
             # save solution
-            # f=File("solution.xdmf")
+            # f=File("sol.xdmf")
             # t = dt
             # s= Function(V)
             # while t < Time + DOLFIN_EPS:
@@ -315,7 +318,7 @@ def compute_div(div_list, velocity):
     print("Computed norm of divergence. Time: %f" % (toc() - tmp))
 
 
-def report_fail(inst):
+def report_fail():
     print("Runtime error:", sys.exc_info()[1])
     print("Traceback:")
     traceback.print_tb(sys.exc_info()[2])
@@ -405,7 +408,7 @@ if str_method == "chorinExpl":
     # Time-stepping
     info("Running of explicit Chorin method")
     t = dt
-    while t < time + DOLFIN_EPS:
+    while t < (time + DOLFIN_EPS):
         print("t = ", t)
 
         # Update boundary condition
@@ -418,7 +421,7 @@ if str_method == "chorinExpl":
         try:
             solve(A1, u1.vector(), b1, "gmres", "default")
         except RuntimeError as inst:
-            report_fail(inst)
+            report_fail()
             exit()
         if doErrControl and round(t, 3) >= measure_time: compute_err(err_u2, u1, t)
         compute_div(div_u2, u1)
@@ -434,7 +437,7 @@ if str_method == "chorinExpl":
         try:
             solve(A2, p1.vector(), b2, "cg", prec)
         except RuntimeError as inst:
-            report_fail(inst)
+            report_fail()
             exit()
         if doSave:
             pFile << p1
@@ -447,7 +450,7 @@ if str_method == "chorinExpl":
         try:
             solve(A3, u1.vector(), b3, "gmres", "default")
         except RuntimeError as inst:
-            report_fail(inst)
+            report_fail()
             exit()
         if doErrControl and round(t, 3) >= measure_time: compute_err(err_u, u1, t)
         compute_div(div_u, u1)
@@ -532,7 +535,7 @@ if str_method == "direct":
         try:
             NS_solver.solve()
         except RuntimeError as inst:
-            report_fail(inst)
+            report_fail()
             exit()
         end()
 
