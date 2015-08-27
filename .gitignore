@@ -5,7 +5,7 @@
 *.ods
 *.h5
 *.h
-results*
+results/*
 csv
 math
 sys

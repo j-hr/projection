@@ -1,7 +1,7 @@
 from __future__ import print_function
 from dolfin import *
-import math, csv, sys, os, traceback
-import womersleyBC
+import math, csv, sys
+import womersleyBC, results
 
 # Reduce HDD usage
 # TODO IF NEEDED option to set which steps to save (for example save only (t mod 0.05) == 0 )
@@ -11,14 +11,23 @@ import womersleyBC
 
 # Continue work
 # TODO another projection methods (MiroK)
-#   ipc0
-#   ipc1
+#   ipcs0
+#   ipcs1
 #   rotational scheme
 # TODO if method == ... change to if hasTentative
 
 # Issues
 # TODO cyl3 cannot be solved directly, pulsePrec also fails. try mumps, then paralelize
-# mesh.hmax() returns strange values
+# mesh.hmax() returns strange values >> hmin() is better
+#   Mesh name:  cyl_c1      <Mesh of topological dimension 3 (tetrahedra) with 280 vertices and 829 cells, ordered>
+#   Mesh norm max:  6.23747141372
+#   Mesh norm min:  2.23925109892
+#   Mesh name:  cyl_c2      <Mesh of topological dimension 3 (tetrahedra) with 1630 vertices and 6632 cells, ordered>
+#   Mesh norm max:  13.5627060087
+#   Mesh norm min:  1.06943898166
+#   Mesh name:  cyl_c3      <Mesh of topological dimension 3 (tetrahedra) with 10859 vertices and 53056 cells, ordered>
+#   Mesh norm max:  11.1405707495
+#   Mesh norm min:  0.525851168761
 
 # Notes
 # characteristic time for onset ~~ length of pipe/speed of fastest particle = 20(mm /factor*1081(mm/s) ~~  0.02 s/factor
@@ -43,12 +52,14 @@ str_name = sys.argv[9]
 # save mode
 #   save: create .xdmf files with velocity, pressure, divergence
 #   noSave: do not create .xdmf files with velocity, pressure, divergence
-doSave = False
+
+rm = results.ResultsManager()
+
 if sys.argv[8] == 'save':
-    doSave = True
+    rm.doSave = True
     print('Saving solution ON.')
 elif sys.argv[8] == 'noSave':
-    doSave = False
+    rm.doSave = False
     print('Saving solution OFF.')
 else:
     exit('Wrong parameter save_results.')
@@ -56,6 +67,12 @@ else:
 # choose a method: direct, chorinExpl
 str_method = sys.argv[1]
 print("Method:       " + str_method)
+hasTentativeVel = False
+if str_method == 'chorinExpl':
+    hasTentativeVel = True
+    rm.hasTentativeVel = True
+
+
 # choose type of flow:
 #   steady - parabolic profile (0.5 s onset)
 # Womersley profile (1 s period)
@@ -89,7 +106,9 @@ meshName = sys.argv[3]
 mesh = Mesh("meshes/" + meshName + ".xml")
 cell_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_physical_region.xml")
 facet_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_facet_region.xml")
-print("Mesh norm: ", mesh.hmax(), "    ", mesh)
+print("Mesh name: ", meshName, "    ", mesh)
+print("Mesh norm max: ", mesh.hmax())
+print("Mesh norm min: ", mesh.hmin())
 # ======================================================================================================================
 # Define function spaces (P2-P1)
 V = VectorFunctionSpace(mesh, "Lagrange", 2)  # velocity
@@ -100,25 +119,8 @@ PS = FunctionSpace(mesh, "Lagrange", 2)  # partial solution (must be same order 
 nu = 3.71  # kinematic viscosity
 R = 5.0  # cylinder radius
 
-# load precomputed Bessel functions=====================================================================================
-f = HDF5File(mpi_comm_world(), 'precomputed/precomputed_'+meshName+'.hdf5', 'r')
-if doErrControl:
-    if str_type == "pulse0" or str_type == "pulsePrec":
-        temp = toc()
-        coefs_r_prec = []  # these will be functions in PS
-        coefs_i_prec = []  # these will be functions in PS
-        fce = Function(PS)
-        f.read(fce,"parab")
-        c0_prec = Function(fce)
-        for i in range(8):
-            f.read(fce, "real%d" % i)
-            coefs_r_prec.append(Function(fce))
-            f.read(fce, "imag%d" % i)
-            coefs_i_prec.append(Function(fce))
-            # plot(coefs_r_prec[i], title="coefs_r_prec", interactive=True) # reasonable values
-            # plot(coefs_i_prec[i], title="coefs_i_prec", interactive=True) # reasonable values
-        # plot(c0_prec,title="c0_prec",interactive=True)
-        print("Loaded partial solution functions. Time: %f" % (toc() - temp))
+if doErrControl and (str_type == "pulse0" or str_type == "pulsePrec"):
+    rm.load_precomputed_bessel_functions(meshName, PS)
 
 # MOVE#==Boundary Conditions================================================================================
 # boundary parts: 1 walls, 2 inflow, 3 outflow
@@ -153,13 +155,19 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     I = Identity(u.geometric_dimension())  # Identity tensor
     x = SpatialCoordinate(mesh)
 
+
     # Define steady part of the equation
     def T(u):
         return -p * I + 2.0 * nu * sym(grad(u))
 
+
     # Define variational forms
     F = (inner(T(u), grad(v)) - q * div(u)) * dx
-    solve(lhs(F) == rhs(F), w, bcu)  # why this way?
+    try:
+        solve(lhs(F) == rhs(F), w, bcu)  # QQ why this way?
+    except RuntimeError as inst:
+        rm.report_fail(str_name, factor, dt, t)
+        exit()
     # Extract solutions:
     (u_prec, p_prec) = w.split()
     print("Computed initial velocity. Time:%f" % (toc() - temp))
@@ -168,104 +176,12 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     # plot(u_prec, mode = "glyphs", title="steady solution", interactive=True)
     # exit()
 
-# MOVE#==Analytic solution====================================================================================
 if doErrControl:
-    temp = toc()
-    if str_type == "steady":
-        global solution
-        solution = interpolate(
-            Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"), factor=factor), V)
-        print("Prepared analytic solution. Time: %f" % (toc() - temp))
-    elif (str_type == "pulse0") or (str_type == "pulsePrec"):
-        def assembleSolution(t):  # returns Womersley sol for time t
-            tmp = toc()
-            sol = Function(V)
-            dofs2 = V.sub(2).dofmap().dofs()  # gives field of indices corresponding to z axis
-            sol.assign(Constant(("0.0", "0.0", "0.0")))
-            sol.vector()[dofs2] = factor * c0_prec.vector().array()  # parabolic part of sol
-            coefs_exp = [-8, 8, 6, -6, -4, 4, 2, -2]
-            for idx in range(8):  # add modes of Womersley sol
-                sol.vector()[dofs2] += factor * cos(coefs_exp[idx] * pi * t) * coefs_r_prec[idx].vector().array()
-                sol.vector()[dofs2] += factor * -sin(coefs_exp[idx] * pi * t) * coefs_i_prec[idx].vector().array()
-            print("Assembled analytic solution. Time: %f" % (toc() - tmp))
-            return sol
-
-        # plot(assembleSolution(0.0), mode = "glyphs", title="sol")
-        # interactive()
-        # exit()
-        # save solution
-        # f=File("sol.xdmf")
-        # t = dt
-        # s= Function(V)
-        # while t < Time + DOLFIN_EPS:
-        # print("t = ", t)
-        # s.assign(assembleSolution(t))
-        # f << s
-        # t+=dt
-        # exit()
+    rm.prepare_analytic_solution(str_type, factor, V)
 
 # Output settings=======================================================================================================
-# Create files for storing solution
-str_dir_name = str_name + "results_" + str_type + "_" + str_method + "_" + meshName + "_factor%4.2f_%ds_%dms" % (
-    factor, time, dt * 1000)
-# create directory, needed because of using "with open(..." construction later
-if not os.path.exists(str_dir_name):
-    os.mkdir(str_dir_name)
-if doSave:
-    uFile = XDMFFile(mpi_comm_world(), str_dir_name + "/velocity.xdmf")
-    # saves lots of space (for use with static mesh)
-    uFile.parameters['rewrite_function_mesh'] = False
-    dFile = XDMFFile(mpi_comm_world(), str_dir_name + "/divergence.xdmf")  # maybe just compute norm
-    dFile.parameters['rewrite_function_mesh'] = False
-    pFile = XDMFFile(mpi_comm_world(), str_dir_name + "/pressure.xdmf")
-    pFile.parameters['rewrite_function_mesh'] = False
-    if str_method == "chorinExpl":
-        u2File = XDMFFile(mpi_comm_world(), str_dir_name + "/velocity_tent.xdmf")
-        u2File.parameters['rewrite_function_mesh'] = False
-        d2File = XDMFFile(mpi_comm_world(), str_dir_name + "/div_tent.xdmf")  # maybe just compute norm
-        d2File.parameters['rewrite_function_mesh'] = False
-
-# method for saving divergence (ensuring, that it will be one time line in ParaView)
-D = FunctionSpace(mesh, "Lagrange", 1)
-divFunction = Function(D)
-
-
-def save_div(field, divFile):
-    tmp = toc()
-    divFunction.assign(project(div(field), D))
-    divFile << divFunction
-    print("Computed and saved divergence. Time: %f" % (toc() - tmp))
-
-
-# method for saving velocity (ensuring, that it will be one time line in ParaView)
-vel = Function(V)
-
-
-def save_vel(field, velFile):
-    tmp = toc()
-    vel.assign(field)
-    velFile << vel
-    print("Saved solution. Time: %f" % (toc() - tmp))
-
-
-div_u = []
-div_u2 = []
-
-
-def compute_div(div_list, velocity):
-    tmp = toc()
-    div_list.append(norm(velocity, 'Hdiv0'))
-    print("Computed norm of divergence. Time: %f" % (toc() - tmp))
-
-
-def report_fail():
-    print("Runtime error:", sys.exc_info()[1])
-    print("Traceback:")
-    traceback.print_tb(sys.exc_info()[2])
-    f = open(str_name + "_factor%4.2f_step_%dms_failed_at_%5.3f.report" % (factor, dt * 1000, t), "w")
-    f.write(traceback.format_exc())
-    f.close()
-
+rm.str_dir_name = "%sresults_%s_%s_%s_factor%4.2f_%ds_%dms" %(str_name, str_type, str_method, meshName, factor, time, dt * 1000)
+rm.initialize_output(V, mesh)
 
 # ==Error control====================================================================================
 time_erc = 0  # total time spent on measuring error
@@ -312,9 +228,9 @@ if str_method == "chorinExpl":
     u0 = Function(V)
     if str_type == "pulsePrec":
         assign(u0, u_prec)
-    if doSave:
-        save_vel(u0, uFile)
-        save_vel(u0, u2File)
+    if rm.doSave:
+        rm.save_vel(False, u0)
+        rm.save_vel(True, u0)
     u1 = Function(V)
     p1 = Function(Q)
 
@@ -361,13 +277,13 @@ if str_method == "chorinExpl":
         try:
             solve(A1, u1.vector(), b1, "gmres", "default")
         except RuntimeError as inst:
-            report_fail()
+            rm.report_fail(str_name, factor, dt, t)
             exit()
         if doErrControl and round(t, 3) >= measure_time: compute_err(err_u2, u1, t)
-        compute_div(div_u2, u1)
-        if doSave:
-            save_vel(u1, u2File)
-            save_div(u1, d2File)
+        rm.compute_div(True, u1)
+        if rm.doSave:
+            rm.save_vel(True, u1)
+            rm.save_div(True, u1)
         end()
 
         # Pressure correction
@@ -377,10 +293,10 @@ if str_method == "chorinExpl":
         try:
             solve(A2, p1.vector(), b2, "cg", prec)
         except RuntimeError as inst:
-            report_fail()
+            rm.report_fail(str_name, factor, dt, t)
             exit()
-        if doSave:
-            pFile << p1
+        if rm.doSave:
+            rm.pFile << p1
         end()
 
         # Velocity correction
@@ -390,13 +306,13 @@ if str_method == "chorinExpl":
         try:
             solve(A3, u1.vector(), b3, "gmres", "default")
         except RuntimeError as inst:
-            report_fail()
+            rm.report_fail(str_name, factor, dt, t)
             exit()
         if doErrControl and round(t, 3) >= measure_time: compute_err(err_u, u1, t)
-        compute_div(div_u, u1)
-        if doSave:
-            save_vel(u1, uFile)
-            save_div(u1, dFile)
+        rm.compute_div(False, u1)
+        if rm.doSave:
+            rm.save_vel(False, u1)
+            rm.save_div(False, u1)
         end()
 
         # Move to next time step
@@ -436,15 +352,18 @@ if str_method == "direct":
     u0 = Function(V)  # velocity from previous time step
     if str_type == "pulsePrec":
         assign(u0, u_prec)
-    if doSave:
-        save_vel(u0, uFile)
+    if rm.doSave:
+        rm.save_vel(False, u0)
+
 
     # Define steady part of the equation
     def T(u):
         return -p * I + 2.0 * nu * sym(grad(u))
 
+
     def F(u, v, q):
         return (inner(T(u), grad(v)) - q * div(u)) * dx + inner(grad(u) * u, v) * dx
+
 
     # Define variational forms
     F_ns = (inner((u - u0), v) / dt) * dx + (1.0 - theta) * F(u0, v, q) + theta * F(u, v, q)
@@ -475,7 +394,7 @@ if str_method == "direct":
         try:
             NS_solver.solve()
         except RuntimeError as inst:
-            report_fail()
+            rm.report_fail(str_name, factor, dt, t)
             exit()
         end()
 
@@ -485,11 +404,11 @@ if str_method == "direct":
         # we are assigning twice (now and inside save_vel), but it works with one method save_vel for direct and
         #   projection (we can split save_vel to save one assign)
         fa.assign(velSp, u)
-        if doSave:
-            save_vel(velSp, uFile)
-            save_div(u, dFile)
-            pFile << p
-        compute_div(div_u, u)
+        if rm.doSave:
+            rm.save_vel(False, velSp)
+            rm.save_div(False, u)
+            rm.pFile << p
+        rm.compute_div(False, u)
         if doErrControl and round(t, 3) >= measure_time: compute_err(err_u, u, t)
 
         # Move to next time step
@@ -524,12 +443,12 @@ if doErrControl:
         # last_cycle = time_list[N0:N1]
         # print("N: ",N," len: ",len(last_cycle), " list: ",last_cycle)
         last_cycle_err_u = math.sqrt(sum(err_u[N0:N1]) / N)
-        last_cycle_div = sum(div_u[N0:N1]) / N
+        last_cycle_div = sum(rm.div_u[N0:N1]) / N
         last_cycle_err_min = math.sqrt(min(err_u[N0:N1]))
         last_cycle_err_max = math.sqrt(max(err_u[N0:N1]))
         if str_method == "chorinExpl":
             last_cycle_err_u2 = math.sqrt(sum(err_u2[N0:N1]) / N)
-            last_cycle_div2 = sum(div_u2[N0:N1]) / N
+            last_cycle_div2 = sum(rm.div_u2[N0:N1]) / N
             last_cycle_err_min2 = math.sqrt(min(err_u2[N0:N1]))
             last_cycle_err_max2 = math.sqrt(max(err_u2[N0:N1]))
 
@@ -537,7 +456,7 @@ if doErrControl:
     err_u2 = [math.sqrt(i) for i in err_u2]
 
     # report of error norm for individual time steps
-    with open(str_dir_name + "/report_err.csv", 'w') as reportFile:
+    with open(rm.str_dir_name + "/report_err.csv", 'w') as reportFile:
         reportWriter = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
         reportWriter.writerow(["name"] + ["time"] + time_list)
         reportWriter.writerow([str_name] + ["corrected"] + err_u)
@@ -545,14 +464,14 @@ if doErrControl:
             reportWriter.writerow([str_name] + ["tentative"] + err_u2)
 
 # report of norm of div for individual time steps
-with open(str_dir_name + "/report_div.csv", 'w') as reportFile:
+with open(rm.str_dir_name + "/report_div.csv", 'w') as reportFile:
     reportWriter = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportWriter.writerow([str_name] + ["corrected"] + div_u)
+    reportWriter.writerow([str_name] + ["corrected"] + rm.div_u)
     if str_method == "chorinExpl":
-        reportWriter.writerow([str_name] + ["tentative"] + div_u2)
+        reportWriter.writerow([str_name] + ["tentative"] + rm.div_u2)
 
 # report without header
-with open(str_dir_name + "/report.csv", 'w') as reportFile:
+with open(rm.str_dir_name + "/report.csv", 'w') as reportFile:
     reportWriter = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
     reportWriter.writerow(
         ["pipe_test"] + [str_name] + [str_type] + [str_method] + [meshName] + [mesh] + [factor] + [time] + [dt] + [
@@ -561,7 +480,7 @@ with open(str_dir_name + "/report.csv", 'w') as reportFile:
             last_cycle_err_max] + [last_cycle_err_min2] + [last_cycle_err_max2])
 
 # report with header
-with open(str_dir_name + "/report_h.csv", 'w') as reportFile:
+with open(rm.str_dir_name + "/report_h.csv", 'w') as reportFile:
     reportWriter = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
     reportWriter.writerow(
         ["problem"] + ["name"] + ["type"] + ["method"] + ["mesh_name"] + ["mesh"] + ["factor"] + ["time"] + ["dt"] + [
