@@ -1,13 +1,18 @@
 from __future__ import print_function
 from dolfin import *
-import math, csv, sys
-import womersleyBC, results
+import sys
+
+import womersleyBC
+import results
+
 
 # Reduce HDD usage
 # TODO IF NEEDED option to set which steps to save (for example save only (t mod 0.05) == 0 )
 
 # Reorganize code
 # TODO Move to multiple files
+#   move rests of error control to results.py
+#   clean results.py, clean pipe_test-results communication (treat rm variables as private)
 
 # Continue work
 # TODO another projection methods (MiroK)
@@ -82,20 +87,20 @@ str_type = sys.argv[2]
 print("Problem type: " + str_type)
 
 if sys.argv[7] == "0":
-    doErrControl = False
+    rm.doErrControl = False
     print("Error control omitted")
 else:
-    doErrControl = True
+    rm.doErrControl = True
     if sys.argv[7] == "-1":
-        measure_time = 0.5 if str_type == "steady" else 1  # maybe change
+        rm.measure_time = 0.5 if str_type == "steady" else 1  # maybe change
     else:
-        measure_time = float(sys.argv[7])
-    print("Error control from:       %4.2f s" % measure_time)
+        rm.measure_time = float(sys.argv[7])
+    print("Error control from:       %4.2f s" % rm.measure_time)
 
 # Set parameter values
 dt = float(sys.argv[5])
-time = float(sys.argv[4])
-print("Time:         %1.0f s\ndt:           %d ms" % (time, 1000 * dt))
+ttime = float(sys.argv[4])
+print("Time:         %1.0f s\ndt:           %d ms" % (ttime, 1000 * dt))
 factor = float(sys.argv[6])  # default: 1.0
 print("Velocity scale factor = %4.2f" % factor)
 reynolds = 728.761 * factor
@@ -118,9 +123,6 @@ PS = FunctionSpace(mesh, "Lagrange", 2)  # partial solution (must be same order 
 # fixed parameters (used in analytic solution and in BC)
 nu = 3.71  # kinematic viscosity
 R = 5.0  # cylinder radius
-
-if doErrControl and (str_type == "pulse0" or str_type == "pulsePrec"):
-    rm.load_precomputed_bessel_functions(meshName, PS)
 
 # MOVE#==Boundary Conditions================================================================================
 # boundary parts: 1 walls, 2 inflow, 3 outflow
@@ -155,11 +157,9 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     I = Identity(u.geometric_dimension())  # Identity tensor
     x = SpatialCoordinate(mesh)
 
-
     # Define steady part of the equation
     def T(u):
         return -p * I + 2.0 * nu * sym(grad(u))
-
 
     # Define variational forms
     F = (inner(T(u), grad(v)) - q * div(u)) * dx
@@ -176,35 +176,11 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     # plot(u_prec, mode = "glyphs", title="steady solution", interactive=True)
     # exit()
 
-if doErrControl:
-    rm.prepare_analytic_solution(str_type, factor, V)
-
-# Output settings=======================================================================================================
-rm.str_dir_name = "%sresults_%s_%s_%s_factor%4.2f_%ds_%dms" %(str_name, str_type, str_method, meshName, factor, time, dt * 1000)
+# Output and error control =============================================================================================
+rm.str_dir_name = "%sresults_%s_%s_%s_" \
+                  "factor%4.2f_%ds_%dms" % (str_name, str_type, str_method, meshName, factor, ttime, dt * 1000)
 rm.initialize_output(V, mesh)
-
-# ==Error control====================================================================================
-time_erc = 0  # total time spent on measuring error
-time_list = []  # list of times, when error is  measured (used in report)
-err_u = []
-err_u2 = []
-if doErrControl:
-
-    def compute_err(er_list, velocity, t):
-        if len(time_list) == 0 or (time_list[-1] < round(t, 3)):  # add only once per time step
-            time_list.append(round(t, 3))  # round time step to 0.001
-        tmp = toc()
-        if str_type == "steady":
-            # er_list.append(pow(errornorm(velocity, solution, norm_type='l2', degree_rise=0),2)) # slower, reliable
-            er_list.append(assemble(inner(velocity - solution, velocity - solution) * dx))  # faster
-        elif (str_type == "pulse0") or (str_type == "pulsePrec"):
-            # er_list.append(pow(errornorm(velocity, assembleSolution(t), norm_type='l2', degree_rise=0),2))
-            sol = assembleSolution(t)  # name must be different than solution - solution must be treated as global
-            er_list.append(assemble(inner(velocity - sol, velocity - sol) * dx))  # faster
-        global time_erc
-        terc = toc() - tmp
-        time_erc += terc
-        print("Computed errornorm. Time: %f, Total: %f" % (terc, time_erc))
+rm.initialize_error_control(str_type, factor, PS, V, meshName)
 
 # ==Explicit Chorin method====================================================================================
 if str_method == "chorinExpl":
@@ -264,7 +240,7 @@ if str_method == "chorinExpl":
     # Time-stepping
     info("Running of explicit Chorin method")
     t = dt
-    while t < (time + DOLFIN_EPS):
+    while t < (ttime + DOLFIN_EPS):
         print("t = ", t)
 
         # Update boundary condition
@@ -279,7 +255,8 @@ if str_method == "chorinExpl":
         except RuntimeError as inst:
             rm.report_fail(str_name, factor, dt, t)
             exit()
-        if doErrControl and round(t, 3) >= measure_time: compute_err(err_u2, u1, t)
+        if rm.doErrControl and round(t, 3) >= rm.measure_time:
+            rm.compute_err(True, u1, t, str_type, V, factor)
         rm.compute_div(True, u1)
         if rm.doSave:
             rm.save_vel(True, u1)
@@ -308,7 +285,8 @@ if str_method == "chorinExpl":
         except RuntimeError as inst:
             rm.report_fail(str_name, factor, dt, t)
             exit()
-        if doErrControl and round(t, 3) >= measure_time: compute_err(err_u, u1, t)
+        if rm.doErrControl and round(t, 3) >= rm.measure_time:
+            rm.compute_err(False, u1, t, str_type, V, factor)
         rm.compute_div(False, u1)
         if rm.doSave:
             rm.save_vel(False, u1)
@@ -355,15 +333,12 @@ if str_method == "direct":
     if rm.doSave:
         rm.save_vel(False, u0)
 
-
     # Define steady part of the equation
     def T(u):
         return -p * I + 2.0 * nu * sym(grad(u))
 
-
     def F(u, v, q):
         return (inner(T(u), grad(v)) - q * div(u)) * dx + inner(grad(u) * u, v) * dx
-
 
     # Define variational forms
     F_ns = (inner((u - u0), v) / dt) * dx + (1.0 - theta) * F(u0, v, q) + theta * F(u, v, q)
@@ -384,7 +359,7 @@ if str_method == "direct":
     # Time-stepping
     info("Running of direct method")
     t = dt
-    while t < (time + DOLFIN_EPS):
+    while t < (ttime + DOLFIN_EPS):
         print("t = ", t)
 
         v_in.t = t
@@ -409,7 +384,8 @@ if str_method == "direct":
             rm.save_div(False, u)
             rm.pFile << p
         rm.compute_div(False, u)
-        if doErrControl and round(t, 3) >= measure_time: compute_err(err_u, u, t)
+        if rm.doErrControl and round(t, 3) >= rm.measure_time:
+            rm.compute_err(False, u, t, str_type, V, factor)
 
         # Move to next time step
         assign(u0, u)
@@ -417,82 +393,5 @@ if str_method == "direct":
 
     info("Finished: direct method")
 
-# ==Report====================================================================================
-total = toc()
-total_err_u = 0
-total_err_u2 = 0
-avg_err_u = 0
-avg_err_u2 = 0
-last_cycle_err_u = 0
-last_cycle_err_u2 = 0
-last_cycle_div = 0
-last_cycle_div2 = 0
-last_cycle_err_min = 0
-last_cycle_err_max = 0
-last_cycle_err_min2 = 0
-last_cycle_err_max2 = 0
-if doErrControl:
-    total_err_u = math.sqrt(sum(err_u))
-    total_err_u2 = math.sqrt(sum(err_u2))
-    avg_err_u = total_err_u / math.sqrt(len(time_list))
-    avg_err_u2 = total_err_u2 / math.sqrt(len(time_list))
-    if time >= measure_time + 1 - DOLFIN_EPS:
-        N = 1.0 / dt
-        N0 = int(round(len(time_list) - N))
-        N1 = int(round(len(time_list)))
-        # last_cycle = time_list[N0:N1]
-        # print("N: ",N," len: ",len(last_cycle), " list: ",last_cycle)
-        last_cycle_err_u = math.sqrt(sum(err_u[N0:N1]) / N)
-        last_cycle_div = sum(rm.div_u[N0:N1]) / N
-        last_cycle_err_min = math.sqrt(min(err_u[N0:N1]))
-        last_cycle_err_max = math.sqrt(max(err_u[N0:N1]))
-        if str_method == "chorinExpl":
-            last_cycle_err_u2 = math.sqrt(sum(err_u2[N0:N1]) / N)
-            last_cycle_div2 = sum(rm.div_u2[N0:N1]) / N
-            last_cycle_err_min2 = math.sqrt(min(err_u2[N0:N1]))
-            last_cycle_err_max2 = math.sqrt(max(err_u2[N0:N1]))
-
-    err_u = [math.sqrt(i) for i in err_u]
-    err_u2 = [math.sqrt(i) for i in err_u2]
-
-    # report of error norm for individual time steps
-    with open(rm.str_dir_name + "/report_err.csv", 'w') as reportFile:
-        reportWriter = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-        reportWriter.writerow(["name"] + ["time"] + time_list)
-        reportWriter.writerow([str_name] + ["corrected"] + err_u)
-        if str_method == "chorinExpl":
-            reportWriter.writerow([str_name] + ["tentative"] + err_u2)
-
-# report of norm of div for individual time steps
-with open(rm.str_dir_name + "/report_div.csv", 'w') as reportFile:
-    reportWriter = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportWriter.writerow([str_name] + ["corrected"] + rm.div_u)
-    if str_method == "chorinExpl":
-        reportWriter.writerow([str_name] + ["tentative"] + rm.div_u2)
-
-# report without header
-with open(rm.str_dir_name + "/report.csv", 'w') as reportFile:
-    reportWriter = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportWriter.writerow(
-        ["pipe_test"] + [str_name] + [str_type] + [str_method] + [meshName] + [mesh] + [factor] + [time] + [dt] + [
-            total - time_erc] + [time_erc] + [total_err_u] + [total_err_u2] + [avg_err_u] + [avg_err_u2] + [
-            last_cycle_err_u] + [last_cycle_err_u2] + [last_cycle_div] + [last_cycle_div2] + [last_cycle_err_min] + [
-            last_cycle_err_max] + [last_cycle_err_min2] + [last_cycle_err_max2])
-
-# report with header
-with open(rm.str_dir_name + "/report_h.csv", 'w') as reportFile:
-    reportWriter = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-    reportWriter.writerow(
-        ["problem"] + ["name"] + ["type"] + ["method"] + ["mesh_name"] + ["mesh"] + ["factor"] + ["time"] + ["dt"] + [
-            "timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"] + ["avg_err_u"] + [
-            "avg_err_u2"] + ["last_cycle_err_u"] + ["last_cycle_err_u2"] + ["last_cycle_div"] + ["last_cycle_div2"] + [
-            "last_cycle_err_min"] + ["last_cycle_err_max"] + ["last_cycle_err_min2"] + ["last_cycle_err_max2"])
-    reportWriter.writerow(
-        ["pipe_test"] + [str_name] + [str_type] + [str_method] + [meshName] + [mesh] + [factor] + [time] + [dt] + [
-            total - time_erc] + [time_erc] + [total_err_u] + [total_err_u2] + [avg_err_u] + [avg_err_u2] + [
-            last_cycle_err_u] + [last_cycle_err_u2] + [last_cycle_div] + [last_cycle_div2] + [last_cycle_err_min] + [
-            last_cycle_err_max] + [last_cycle_err_min2] + [last_cycle_err_max2])
-
-# create file showing all was done well
-f = open(str_name + "_factor%4.2f_step_%dms_OK.report" % (factor, dt * 1000), "w")
-f.close()
+# Report
+rm.report(dt, ttime, str_name, str_type, str_method, meshName, mesh, factor)
