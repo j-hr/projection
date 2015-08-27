@@ -1,12 +1,7 @@
 from __future__ import print_function
 from dolfin import *
-import math
-import csv
-import sys
-import os
-from sympy import I, re, im, sqrt, exp, symbols, lambdify, besselj
-from scipy.special import jv
-import traceback
+import math, csv, sys, os, traceback
+import womersleyBC
 
 # Reduce HDD usage
 # TODO IF NEEDED option to set which steps to save (for example save only (t mod 0.05) == 0 )
@@ -17,7 +12,7 @@ import traceback
 # Continue work
 # TODO another projection methods (MiroK)
 #   ipc0
-#   ipc2
+#   ipc1
 #   rotational scheme
 # TODO if method == ... change to if hasTentative
 
@@ -101,7 +96,7 @@ V = VectorFunctionSpace(mesh, "Lagrange", 2)  # velocity
 Q = FunctionSpace(mesh, "Lagrange", 1)  # pressure
 PS = FunctionSpace(mesh, "Lagrange", 2)  # partial solution (must be same order as V)
 
-# fixed parameters (used in analytic solution)
+# fixed parameters (used in analytic solution and in BC)
 nu = 3.71  # kinematic viscosity
 R = 5.0  # cylinder radius
 
@@ -134,42 +129,9 @@ if str_type == "steady":
                        (factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1])))"),
                       t=0, factor=factor)
 elif str_type == "pulse0" or str_type == "pulsePrec":
-    r, t = symbols('r t')
-    u = factor * (-43.2592 * r ** 2 +
-                  (-11.799 + 0.60076 * I) * ((0.000735686 - 0.000528035 * I)
-                                             * besselj(0, r * (1.84042 + 1.84042 * I)) + 1) * exp(-8 * I * pi * t) +
-                  (-11.799 - 0.60076 * I) * ((0.000735686 + 0.000528035 * I)
-                                             * besselj(0, r * (1.84042 - 1.84042 * I)) + 1) * exp(8 * I * pi * t) +
-                  (-26.3758 - 4.65265 * I) * (-(0.000814244 - 0.00277126 * I)
-                                              * besselj(0, r * (1.59385 - 1.59385 * I)) + 1) * exp(6 * I * pi * t) +
-                  (-26.3758 + 4.65265 * I) * (-(0.000814244 + 0.00277126 * I)
-                                              * besselj(0, r * (1.59385 + 1.59385 * I)) + 1) * exp(-6 * I * pi * t) +
-                  (-51.6771 + 27.3133 * I) * (-(0.0110653 - 0.00200668 * I)
-                                              * besselj(0, r * (1.30138 + 1.30138 * I)) + 1) * exp(-4 * I * pi * t) +
-                  (-51.6771 - 27.3133 * I) * (-(0.0110653 + 0.00200668 * I)
-                                              * besselj(0, r * (1.30138 - 1.30138 * I)) + 1) * exp(4 * I * pi * t) +
-                  (-33.1594 - 95.2423 * I) * ((0.0314408 - 0.0549981 * I)
-                                              * besselj(0, r * (0.920212 - 0.920212 * I)) + 1) * exp(2 * I * pi * t) +
-                  (-33.1594 + 95.2423 * I) * ((0.0314408 + 0.0549981 * I)
-                                              * besselj(0, r * (0.920212 + 0.920212 * I)) + 1) * exp(
-                      -2 * I * pi * t) + 1081.48)
-    # how this works?
-    u_lambda = lambdify([r, t], u, ['numpy', {'besselj': jv}])
+    womersleyBC.factor = factor
+    v_in = womersleyBC.WomersleyProfile()
 
-
-    class WomersleyProfile(Expression):
-        def eval(self, value, x):
-            rad = float(sqrt(x[0] * x[0] + x[1] * x[
-                1]))  # conversion to float needed, u_lambda (and near) cannot use sympy Float as input
-            value[0] = 0
-            value[1] = 0
-            value[2] = 0 if near(rad, R) else re(u_lambda(rad, t))  # do not evaluate on boundaries, it's 0
-
-        def value_shape(self):
-            return (3,)
-
-
-    v_in = WomersleyProfile()
 # MOVE#==Initial Conditions================================================================================
 if str_type == "pulsePrec":  # computes initial velocity as a solution of steady Stokes problem with input velocity v_in
     temp = toc()
