@@ -7,21 +7,23 @@ import results
 
 
 # Reduce HDD usage
-# TODO IF NEEDED option to set which steps to save (for example save only (t mod 0.05) == 0 )
+# IFNEED option to set which steps to save (for example save only (t mod 0.05) == 0 )
 
 # Reorganize code
-# TODO Move to multiple files
-#   move rests of error control to results.py
-#   clean results.py, clean pipe_test-results communication (treat rm variables as private)
+# TODO clean results.py
+# FUTURE (adapting for different geometry) move IC, BC, ?mesh to problem file
 
 # Continue work
 # TODO another projection methods (MiroK)
-#   ipcs0
-#   ipcs1
-#   rotational scheme
+# TODO ipcs0
+# TODO ipcs1
+# TODO rotational scheme
 # TODO if method == ... change to if hasTentative
 
 # Issues
+# QQ How to be sure that analytic solution is right?
+# TODO check compatibility of solution and inflow condition it should be equal
+# TODO check if errornorm and integral give the same results
 # TODO cyl3 cannot be solved directly, pulsePrec also fails. try mumps, then paralelize
 # mesh.hmax() returns strange values >> hmin() is better
 #   Mesh name:  cyl_c1      <Mesh of topological dimension 3 (tetrahedra) with 280 vertices and 829 cells, ordered>
@@ -54,30 +56,6 @@ if len(sys.argv) != nargs + 1:
 # name used for result folders and report files
 str_name = sys.argv[9]
 
-# save mode
-#   save: create .xdmf files with velocity, pressure, divergence
-#   noSave: do not create .xdmf files with velocity, pressure, divergence
-
-rm = results.ResultsManager()
-
-if sys.argv[8] == 'save':
-    rm.doSave = True
-    print('Saving solution ON.')
-elif sys.argv[8] == 'noSave':
-    rm.doSave = False
-    print('Saving solution OFF.')
-else:
-    exit('Wrong parameter save_results.')
-
-# choose a method: direct, chorinExpl
-str_method = sys.argv[1]
-print("Method:       " + str_method)
-hasTentativeVel = False
-if str_method == 'chorinExpl':
-    hasTentativeVel = True
-    rm.hasTentativeVel = True
-
-
 # choose type of flow:
 #   steady - parabolic profile (0.5 s onset)
 # Womersley profile (1 s period)
@@ -86,16 +64,24 @@ if str_method == 'chorinExpl':
 str_type = sys.argv[2]
 print("Problem type: " + str_type)
 
-if sys.argv[7] == "0":
-    rm.doErrControl = False
-    print("Error control omitted")
-else:
-    rm.doErrControl = True
-    if sys.argv[7] == "-1":
-        rm.measure_time = 0.5 if str_type == "steady" else 1  # maybe change
-    else:
-        rm.measure_time = float(sys.argv[7])
-    print("Error control from:       %4.2f s" % rm.measure_time)
+# save mode
+#   save: create .xdmf files with velocity, pressure, divergence
+#   noSave: do not create .xdmf files with velocity, pressure, divergence
+rm = results.ResultsManager()
+rm.set_save_mode(sys.argv[8])
+
+# error control mode
+#   0 no error control
+#   -1 default option (start measuring error at 0.5 for steady and 1.0 for unsteady flow)
+rm.set_error_control_mode(sys.argv[7], str_type)
+
+# choose a method: direct, chorinExpl
+str_method = sys.argv[1]
+print("Method:       " + str_method)
+hasTentativeVel = False
+if str_method == 'chorinExpl':
+    hasTentativeVel = True
+    rm.hasTentativeVel = True
 
 # Set parameter values
 dt = float(sys.argv[5])
@@ -177,9 +163,8 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     # exit()
 
 # Output and error control =============================================================================================
-rm.str_dir_name = "%sresults_%s_%s_%s_" \
-                  "factor%4.2f_%ds_%dms" % (str_name, str_type, str_method, meshName, factor, ttime, dt * 1000)
-rm.initialize_output(V, mesh)
+rm.initialize_output(V, mesh, "%sresults_%s_%s_%s_factor%4.2f_%ds_%dms" % (str_name, str_type, str_method, meshName,
+                                                                           factor, ttime, dt * 1000))
 rm.initialize_error_control(str_type, factor, PS, V, meshName)
 
 # ==Explicit Chorin method====================================================================================
@@ -216,7 +201,7 @@ if str_method == "chorinExpl":
 
     # Tentative velocity step
     F1 = (1 / k) * inner(u - u0, v) * dx + inner(grad(u0) * u0, v) * dx + \
-         nu * inner(grad(u), grad(v)) * dx - inner(f, v) * dx
+        nu * inner(grad(u), grad(v)) * dx - inner(f, v) * dx
     a1 = lhs(F1)
     L1 = rhs(F1)
 
@@ -242,6 +227,7 @@ if str_method == "chorinExpl":
     t = dt
     while t < (ttime + DOLFIN_EPS):
         print("t = ", t)
+        do_EC = rm.do_compute_error(t)
 
         # Update boundary condition
         v_in.t = t
@@ -255,7 +241,7 @@ if str_method == "chorinExpl":
         except RuntimeError as inst:
             rm.report_fail(str_name, factor, dt, t)
             exit()
-        if rm.doErrControl and round(t, 3) >= rm.measure_time:
+        if do_EC:
             rm.compute_err(True, u1, t, str_type, V, factor)
         rm.compute_div(True, u1)
         if rm.doSave:
@@ -285,7 +271,7 @@ if str_method == "chorinExpl":
         except RuntimeError as inst:
             rm.report_fail(str_name, factor, dt, t)
             exit()
-        if rm.doErrControl and round(t, 3) >= rm.measure_time:
+        if do_EC:
             rm.compute_err(False, u1, t, str_type, V, factor)
         rm.compute_div(False, u1)
         if rm.doSave:
@@ -361,6 +347,7 @@ if str_method == "direct":
     t = dt
     while t < (ttime + DOLFIN_EPS):
         print("t = ", t)
+        do_EC = rm.do_compute_error(t)
 
         v_in.t = t
 
@@ -384,7 +371,7 @@ if str_method == "direct":
             rm.save_div(False, u)
             rm.pFile << p
         rm.compute_div(False, u)
-        if rm.doErrControl and round(t, 3) >= rm.measure_time:
+        if do_EC:
             rm.compute_err(False, u, t, str_type, V, factor)
 
         # Move to next time step

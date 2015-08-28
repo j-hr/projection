@@ -38,6 +38,28 @@ class ResultsManager:
         self.D = None
         self.divFunction = None
 
+    def set_save_mode(self, option):
+        if option == 'save':
+            self.doSave = True
+            print('Saving solution ON.')
+        elif option == 'noSave':
+            self.doSave = False
+            print('Saving solution OFF.')
+        else:
+            exit('Wrong parameter save_results, should be \"save\" o \"noSave\".')
+
+    def set_error_control_mode(self, option, str_type):
+        if option == "0":
+            self.doErrControl = False
+            print("Error control omitted")
+        else:
+            self.doErrControl = True
+            if option == "-1":
+                self.measure_time = 0.5 if str_type == "steady" else 1
+            else:
+                self.measure_time = float(sys.argv[7])
+            print("Error control from:       %4.2f s" % self.measure_time)
+
 # Output control========================================================================================================
     def initialize_xdmf_files(self):
         print('  Initializing output files.')
@@ -54,8 +76,9 @@ class ResultsManager:
             self.d2File = XDMFFile(mpi_comm_world(), self.str_dir_name + "/div_tent.xdmf")  # maybe just compute norm
             self.d2File.parameters['rewrite_function_mesh'] = False
 
-    def initialize_output(self, velocity_space, mesh):
+    def initialize_output(self, velocity_space, mesh, dir_name):
         print('Initializing output')
+        self.str_dir_name = dir_name
         # create directory, needed because of using "with open(..." construction later
         if not os.path.exists(self.str_dir_name):
             os.mkdir(self.str_dir_name)
@@ -64,6 +87,11 @@ class ResultsManager:
             self.D = FunctionSpace(mesh, "Lagrange", 1)
             self.divFunction = Function(self.D)
             self.initialize_xdmf_files()
+
+    def do_compute_error(self, time_step):
+        if not self.doErrControl:
+            return False
+        return round(time_step, 3) >= self.measure_time
 
     # method for saving divergence (ensuring, that it will be one time line in ParaView)
     def save_div(self, isTent, field):
