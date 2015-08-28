@@ -5,6 +5,7 @@ import sys
 import womersleyBC
 import results
 
+# TODO authors, license
 
 # Reduce HDD usage
 # IFNEED option to set which steps to save (for example save only (t mod 0.05) == 0 )
@@ -14,11 +15,11 @@ import results
 # FUTURE (adapting for different geometry) move IC, BC, ?mesh to problem file
 
 # Continue work
-# TODO another projection methods (MiroK)
+# another projection methods (MiroK)
 # TODO ipcs0
+#   TODO implement pulsePrec variant (with precomputed pressure)
 # TODO ipcs1
 # TODO rotational scheme
-# TODO if method == ... change to if hasTentative
 
 # Issues
 # QQ How to be sure that analytic solution is right?
@@ -75,13 +76,17 @@ rm.set_save_mode(sys.argv[8])
 #   -1 default option (start measuring error at 0.5 for steady and 1.0 for unsteady flow)
 rm.set_error_control_mode(sys.argv[7], str_type)
 
-# choose a method: direct, chorinExpl
+# choose a method: direct, chorinExpl, ipcs0, ipcs0p
 str_method = sys.argv[1]
 print("Method:       " + str_method)
 hasTentativeVel = False
-if str_method == 'chorinExpl':
+if str_method == 'chorinExpl' or str_method == 'ipcs0' or str_method == 'ipcs0p':
     hasTentativeVel = True
     rm.hasTentativeVel = True
+
+pressure_BC = True
+if str_method == 'ipcs0p':
+    pressure_BC = False
 
 # Set parameter values
 dt = float(sys.argv[5])
@@ -110,7 +115,7 @@ PS = FunctionSpace(mesh, "Lagrange", 2)  # partial solution (must be same order 
 nu = 3.71  # kinematic viscosity
 R = 5.0  # cylinder radius
 
-# MOVE#==Boundary Conditions================================================================================
+# Boundary Conditions===================================================================================================
 # boundary parts: 1 walls, 2 inflow, 3 outflow
 noSlip = Constant((0.0, 0.0, 0.0))
 if str_type == "steady":
@@ -122,7 +127,7 @@ elif str_type == "pulse0" or str_type == "pulsePrec":
     womersleyBC.factor = factor
     v_in = womersleyBC.WomersleyProfile()
 
-# MOVE#==Initial Conditions================================================================================
+# Initial Conditions====================================================================================================
 if str_type == "pulsePrec":  # computes initial velocity as a solution of steady Stokes problem with input velocity v_in
     temp = toc()
     begin("Computing initial velocity")
@@ -167,7 +172,7 @@ rm.initialize_output(V, mesh, "%sresults_%s_%s_%s_factor%4.2f_%ds_%dms" % (str_n
                                                                            factor, ttime, dt * 1000))
 rm.initialize_error_control(str_type, factor, PS, V, meshName)
 
-# ==Explicit Chorin method====================================================================================
+# Explicit Chorin method================================================================================================
 if str_method == "chorinExpl":
     info("Initialization of explicit Chorin method")
     tic()
@@ -285,7 +290,170 @@ if str_method == "chorinExpl":
 
     info("Finished: explicit Chorin method")
 
-# ==Direct method==============================================================================================
+# Incremental pressure correction scheme with explicit nonlinear term ==================================================
+# incremental = extrapolate pressure from previous steps (here: use previous step)
+# viscosity term treated semi-explicitly (Crank-Nicholson)
+if str_method == 'ipcs0' or str_method == 'ipcs0p':
+    info("Initialization of Incremental pressure correction scheme n. 0")
+    tic()
+
+    # Boundary conditions
+    bc0 = DirichletBC(V, noSlip, facet_function, 1)
+    inflow = DirichletBC(V, v_in, facet_function, 2)
+    outflow = DirichletBC(Q, 0.0, facet_function, 3)  # we can choose, whether to use it, or use projection to nullspace
+    bcu = [inflow, bc0]
+    bcp = []                    # QQ can I use pressure BC when I use grad(p) in velocity?
+    if pressure_BC:             # QQ what approach is better? Compare!
+        bcp = [outflow]
+
+    # Define trial and test functions
+    u = TrialFunction(V)
+    p = TrialFunction(Q)
+    v = TestFunction(V)
+    q = TestFunction(Q)
+
+    # Initial conditions
+    u0 = Function(V)
+    p0 = Function(Q)
+    if str_type == "pulsePrec":
+        assign(u0, u_prec)
+        assign(p0, p_prec)
+    if rm.doSave:
+        rm.save_vel(False, u0)
+        rm.save_vel(True, u0)
+
+    u1 = Function(V)
+    p1 = Function(Q)
+
+    # Define coefficients
+    k = Constant(dt)
+    f = Constant((0, 0, 0))
+
+    # ===================
+    # # Define functions
+    # n = FacetNormal(mesh) # QQ where is it used in MiroK's code?
+    #
+    # # Now that u0, p0 are functions, make sure that they comply with boundary
+    # # conditions. # QQ what does it do?
+    # bcs = {'u' : bcs_u, 'p' : bcs_p}
+    # ics = {'u' : u0, 'p' : p0}
+    # self.apply_bcs_to_ics(bcs, ics)
+
+    # Tentative velocity, solve to u1
+    U = 0.5*(u + u0)
+    F0 = (1./k)*inner(u - u0, v)*dx + inner(dot(grad(u0), u0), v)*dx\
+        + nu*inner(grad(U), grad(v))*dx + inner(grad(p0), v)*dx\
+        - inner(f, v)*dx
+    a0, L0 = system(F0)
+
+    # Projection, solve to p1
+    F1 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u1)*dx
+    a1, L1 = system(F1)
+
+    # Finalize, solve to u1
+    F2 = (1./k)*inner(u - u1, v)*dx + inner(grad(p1 - p0), v)*dx
+    a2, L2 = system(F2)
+
+    # Assemble matrices
+    A0 = assemble(a0)
+    A1 = assemble(a1)
+    A2 = assemble(a2)
+
+    # Create solvers; solver02 for tentative and finalize
+    #                 solver1 for projection
+    solver02 = KrylovSolver('gmres', 'hypre_euclid')   # QQ why these?
+    solver1 = KrylovSolver('cg', 'hypre_amg')          # QQ why these?
+
+    # Get the nullspace if there are no pressure boundary conditions
+    foo = Function(Q)     # auxiliary vector for setting pressure nullspace
+    if not bcp:                               # QQ what happens here?
+        null_vec = Vector(foo.vector())
+        Q.dofmap().set(null_vec, 1.0)
+        null_vec *= 1.0/null_vec.norm('l2')
+        null_space = VectorSpaceBasis([null_vec])
+        solver1.set_nullspace(null_space)
+
+    # apply global options for Krylov solvers # QQ what to use? These are default settings in ns.py
+    options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': False}
+    for solver in [solver02, solver1]:
+        for key, value in options.items():
+            try:
+                solver.parameters[key] = value
+            except KeyError:
+                print('Invalid option %s for KrylovSolver' % key)
+                exit()
+        # reuse the preconditioner
+        try:
+            solver.parameters['preconditioner']['structure'] = 'same'
+        except KeyError:
+            solver.parameters['preconditioner']['reuse'] = True
+
+    # Time-stepping
+    info("Running of Incremental pressure correction scheme n. 0")
+    t = dt
+    while t < (ttime + DOLFIN_EPS):
+        print("t = ", t)
+        do_EC = rm.do_compute_error(t)
+
+        # Update boundary condition
+        v_in.t = t
+
+        # QQ missing assemble matrices?
+
+        # Compute tentative velocity step
+        begin("Computing tentative velocity")
+        b = assemble(L0)
+        [bc.apply(A0, b) for bc in bcu]
+        try:
+            solver02.solve(A0, u1.vector(), b)
+        except RuntimeError as inst:
+            rm.report_fail(str_name, factor, dt, t)
+            exit()
+        if do_EC:
+            rm.compute_err(True, u1, t, str_type, V, factor)
+        rm.compute_div(True, u1)
+        if rm.doSave:
+            rm.save_vel(True, u1)
+            rm.save_div(True, u1)
+        end()
+
+        begin("Computing pressure correction")
+        b = assemble(L1)
+        [bc.apply(A1, b) for bc in bcp]
+        if not bcp:
+            null_space.orthogonalize(b)
+        try:
+            solver1.solve(A1, p1.vector(), b)
+        except RuntimeError as inst:
+            rm.report_fail(str_name, factor, dt, t)
+            exit()
+        if rm.doSave:
+            rm.pFile << p1
+        end()
+
+        b = assemble(L2)
+        [bc.apply(A2, b) for bc in bcu]
+        try:
+            solver02.solve(A2, u1.vector(), b)
+        except RuntimeError as inst:
+            rm.report_fail(str_name, factor, dt, t)
+            exit()
+        if do_EC:
+            rm.compute_err(False, u1, t, str_type, V, factor)
+        rm.compute_div(False, u1)
+        if rm.doSave:
+            rm.save_vel(False, u1)
+            rm.save_div(False, u1)
+        end()
+
+        # Move to next time step
+        p0.assign(p1)
+        u0.assign(u1)
+        t += dt
+
+    info("Finished: Incremental pressure correction scheme n. 0")
+
+# Direct method=========================================================================================================
 if str_method == "direct":
     info("Initialization of direct method")
     tic()

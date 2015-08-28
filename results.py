@@ -3,7 +3,7 @@ from __future__ import print_function
 __author__ = 'jh'
 
 from dolfin import *
-import os, traceback, math, csv
+import os, traceback, math, csv, sys
 
 
 class ResultsManager:
@@ -94,16 +94,16 @@ class ResultsManager:
         return round(time_step, 3) >= self.measure_time
 
     # method for saving divergence (ensuring, that it will be one time line in ParaView)
-    def save_div(self, isTent, field):
-        div_file = self.d2File if isTent else self.dFile
+    def save_div(self, is_tent, field):
+        div_file = self.d2File if is_tent else self.dFile
         tmp = toc()
         self.divFunction.assign(project(div(field), self.D))
         div_file << self.divFunction
         print("Computed and saved divergence. Time: %f" % (toc() - tmp))
 
     # method for saving velocity (ensuring, that it will be one time line in ParaView)
-    def save_vel(self, isTent, field):
-        vel_file = self.u2File if isTent else self.uFile
+    def save_vel(self, is_tent, field):
+        vel_file = self.u2File if is_tent else self.uFile
         tmp = toc()
         self.vel.assign(field)
         vel_file << self.vel
