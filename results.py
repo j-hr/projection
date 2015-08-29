@@ -135,38 +135,48 @@ class ResultsManager:
                 print("Prepared analytic solution. Time: %f" % (toc() - temp))
 
     def assemble_solution(self, t, V, factor):  # returns Womersley sol for time t
+        factor = float(factor)
         tmp = toc()
         sol = Function(V)
         dofs2 = V.sub(2).dofmap().dofs()  # gives field of indices corresponding to z axis
         sol.assign(Constant(("0.0", "0.0", "0.0")))
-        sol.vector()[dofs2] = factor * self.c0_prec.vector().array()  # parabolic part of sol
+        sol.vector()[dofs2] += factor * self.c0_prec.vector().array()  # parabolic part of sol
         for idx in range(8):  # add modes of Womersley sol
             sol.vector()[dofs2] += factor * cos(self.coefs_exp[idx] * pi * t) * self.coefs_r_prec[idx].vector().array()
             sol.vector()[dofs2] += factor * -sin(self.coefs_exp[idx] * pi * t) * self.coefs_i_prec[idx].vector().array()
         print("Assembled analytic solution. Time: %f" % (toc() - tmp))
         return sol
 
-    # plot(assembleSolution(0.0), mode = "glyphs", title="sol")
-    # interactive()
-    # exit()
-    # save solution
-    # f=File("sol.xdmf")
-    # t = dt
-    # s= Function(V)
-    # while t < Time + DOLFIN_EPS:
-    # print("t = ", t)
-    # s.assign(assembleSolution(t))
-    # f << s
-    # t+=dt
-    # exit()
+    def save_solution(self, mesh_name, file_type, factor, t_start, t_end, dt, PS, solution_space):
+        self.load_precomputed_bessel_functions(mesh_name, PS)
+        out = None
+        if file_type == 'xdmf':
+            out = XDMFFile(mpi_comm_world(), 'solution_%s.xdmf' % mesh_name)
+            out.parameters['rewrite_function_mesh'] = False
+        elif file_type == 'hdf5':
+            out = HDF5File(mpi_comm_world(), 'solution_%s.hdf5' % mesh_name, 'w')
+        else:
+            exit('Unsupported file type.')
+        t = float(t_start)
+        s = Function(solution_space)
+        while t < float(t_end) + DOLFIN_EPS:
+            print("t = ", t)
+            s.assign(self.assemble_solution(t, solution_space, factor))
+            if file_type == 'xdmf':
+                out << s
+                print('saved to xdmf')
+            elif file_type == 'hdf5':
+                out.write(s, str(round(1000 * t)))
+                print('saved to hdf5, '+str(int(round(1000 * t))))
+            t += float(dt)
 
     # load precomputed Bessel functions
-    def load_precomputed_bessel_functions(self, meshName, PS):
+    def load_precomputed_bessel_functions(self, mesh_name, PS):
         self.coefs_exp = [-8, 8, 6, -6, -4, 4, 2, -2]
-        f = HDF5File(mpi_comm_world(), 'precomputed/precomputed_'+meshName+'.hdf5', 'r')
+        f = HDF5File(mpi_comm_world(), 'precomputed/precomputed_'+mesh_name+'.hdf5', 'r')
         temp = toc()
         fce = Function(PS)
-        f.read(fce,"parab")
+        f.read(fce, "parab")
         self.c0_prec = Function(fce)
         for i in range(8):
             f.read(fce, "real%d" % i)
