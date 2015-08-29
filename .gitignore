@@ -4,6 +4,7 @@
 *.csv
 *.ods
 *.h5
+*.hdf5
 *.h
 results/*
 csv
