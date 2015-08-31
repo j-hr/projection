@@ -16,9 +16,10 @@ import results
 
 # Continue work
 # another projection methods (MiroK)
-# TODO ipcs0
-# TODO ipcs1
+# TODO ipcs0 (in progress)
+# TODO ipcs1 (in progress)
 # TODO rotational scheme
+# TODO more accurate time measuring (count only solving in time loop)
 
 # Issues
 # QQ How to be sure that analytic solution is right?
@@ -79,12 +80,13 @@ rm.set_error_control_mode(sys.argv[7], str_type)
 str_method = sys.argv[1]
 print("Method:       " + str_method)
 hasTentativeVel = False
-if str_method == 'chorinExpl' or str_method == 'ipcs0' or str_method == 'ipcs0p':
+if str_method == 'chorinExpl' or str_method == 'ipcs0' or str_method == 'ipcs0p' or str_method == 'ipcs1' or\
+        str_method == 'ipcs1p':
     hasTentativeVel = True
     rm.hasTentativeVel = True
 
 pressure_BC = True
-if str_method == 'ipcs0p':
+if str_method == 'ipcs0p' or str_method == 'ipcs1p':
     pressure_BC = False
 
 # Set parameter values
@@ -153,7 +155,8 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     # Define variational forms
     F = (inner(T(u), grad(v)) - q * div(u)) * dx
     try:
-        solve(lhs(F) == rhs(F), w, bcu)  # QQ why this way?
+        # lhs(F) == rhs(F) means that is a linear problem
+        solve(lhs(F) == rhs(F), w, bcu, solver_parameters={'linear_solver': 'mumps'})
     except RuntimeError as inst:
         rm.report_fail(str_name, factor, dt, t)
         exit()
@@ -451,6 +454,178 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
 
     info("Finished: Incremental pressure correction scheme n. 0")
 
+# Incremental pressure correction with nonlinearity treated by Adam-Bashword + Crank-Nicolson. =========================
+# incremental = extrapolate pressure from previous steps (here: use previous step)
+# viscosity term treated semi-explicitly (Crank-Nicholson)
+if str_method == 'ipcs1' or str_method == 'ipcs1p':
+    info("Initialization of Incremental pressure correction scheme n. 1")
+    tic()
+
+    # Boundary conditions
+    bc0 = DirichletBC(V, noSlip, facet_function, 1)
+    inflow = DirichletBC(V, v_in, facet_function, 2)
+    outflow = DirichletBC(Q, 0.0, facet_function, 3)  # we can choose, whether to use it, or use projection to nullspace
+    bcu = [inflow, bc0]
+    bcp = []
+    if pressure_BC:
+        bcp = [outflow]
+
+    # Define trial and test functions
+    u = TrialFunction(V)
+    p = TrialFunction(Q)
+    v = TestFunction(V)
+    q = TestFunction(Q)
+
+    # Initial conditions
+    u0 = Function(V)  # velocity at previous time step
+    u1 = Function(V)  # velocity two time steps back
+    p0 = Function(Q)  # previous pressure
+
+    if str_type == "pulsePrec":
+        assign(u0, u_prec)
+        assign(u1, u_prec)  # QQ how to deal with initial conditions?
+        assign(p0, p_prec)
+    if rm.doSave:
+        rm.save_vel(False, u0)
+        rm.save_vel(True, u0)
+
+    u_ = Function(V)         # current velocity
+    p_ = Function(Q)         # current pressure
+
+    # Define coefficients
+    k = Constant(dt)
+    f = Constant((0, 0, 0))
+
+    # ===================
+    # # Define functions
+    # n = FacetNormal(mesh)
+    #
+    # # Now that u0, p0 are functions, make sure that they comply with boundary
+    # # conditions.
+    # bcs = {'u' : bcs_u, 'p' : bcs_p}
+    # ics = {'u' : u0, 'p' : p0}
+    # self.apply_bcs_to_ics(bcs, ics)
+
+    # Tentative velocity, solve to u_
+    U = 0.5*(u + u0)
+    U_ = 1.5*u0 - 0.5*u1
+
+    nonlinearity = inner(dot(grad(U), U_), v)*dx
+
+    F0 = (1./k)*inner(u - u0, v)*dx + nonlinearity\
+        + nu*inner(grad(U), grad(v))*dx + inner(grad(p0), v)*dx\
+        - inner(f, v)*dx     # solve to u_
+    a0, L0 = system(F0)
+
+    # Projection, solve to p_
+    F1 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
+    a1, L1 = system(F1)
+
+    # Finalize, solve to u_
+    F2 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_ - p0), v)*dx
+    a2, L2 = system(F2)
+
+    # Assemble matrices
+    A0 = assemble(a0)
+    A1 = assemble(a1)
+    A2 = assemble(a2)
+
+    # Create solvers; solver02 for tentative and finalize
+    #                 solver1 for projection
+    solver02 = KrylovSolver('gmres', 'hypre_euclid')
+    solver1 = KrylovSolver('cg', 'hypre_amg')
+
+    # Get the nullspace if there are no pressure boundary conditions
+    foo = Function(Q)     # auxiliary vector for setting pressure nullspace
+    if not bcp:
+        null_vec = Vector(foo.vector())
+        Q.dofmap().set(null_vec, 1.0)
+        null_vec *= 1.0/null_vec.norm('l2')
+        null_space = VectorSpaceBasis([null_vec])
+        solver1.set_nullspace(null_space)
+
+    # apply global options for Krylov solvers
+    options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': False}
+    for solver in [solver02, solver1]:
+        for key, value in options.items():
+            try:
+                solver.parameters[key] = value
+            except KeyError:
+                print('Invalid option %s for KrylovSolver' % key)
+                exit()
+        # reuse the preconditioner
+        try:
+            solver.parameters['preconditioner']['structure'] = 'same'
+        except KeyError:
+            solver.parameters['preconditioner']['reuse'] = True
+
+    # Time-stepping
+    info("Running of Incremental pressure correction scheme n. 1")
+    t = dt
+    while t < (ttime + DOLFIN_EPS):
+        print("t = ", t)
+        do_EC = rm.do_compute_error(t)
+
+        # Update boundary condition
+        v_in.t = t
+
+        # QQ missing assemble matrices?
+        A0 = assemble(a0)
+
+        # Compute tentative velocity step
+        begin("Computing tentative velocity")
+        b = assemble(L0)
+        [bc.apply(A0, b) for bc in bcu]
+        try:
+            solver02.solve(A0, u_.vector(), b)
+        except RuntimeError as inst:
+            rm.report_fail(str_name, factor, dt, t)
+            exit()
+        if do_EC:
+            rm.compute_err(True, u_, t, str_type, V, factor)
+        rm.compute_div(True, u_)
+        if rm.doSave:
+            rm.save_vel(True, u_)
+            rm.save_div(True, u_)
+        end()
+
+        begin("Computing pressure correction")
+        b = assemble(L1)
+        [bc.apply(A1, b) for bc in bcp]
+        if not bcp:
+            null_space.orthogonalize(b)
+        try:
+            solver1.solve(A1, p_.vector(), b)
+        except RuntimeError as inst:
+            rm.report_fail(str_name, factor, dt, t)
+            exit()
+        if rm.doSave:
+            rm.pFile << p_
+        end()
+
+        b = assemble(L2)
+        [bc.apply(A2, b) for bc in bcu]
+        try:
+            solver02.solve(A2, u_.vector(), b)
+        except RuntimeError as inst:
+            rm.report_fail(str_name, factor, dt, t)
+            exit()
+        if do_EC:
+            rm.compute_err(False, u_, t, str_type, V, factor)
+        rm.compute_div(False, u_)
+        if rm.doSave:
+            rm.save_vel(False, u_)
+            rm.save_div(False, u_)
+        end()
+
+        # Move to next time step
+        u1.assign(u0)
+        u0.assign(u_)
+        p0.assign(p_)
+        t += dt
+
+    info("Finished: Incremental pressure correction scheme n. 1")
+
 # Direct method=========================================================================================================
 if str_method == "direct":
     info("Initialization of direct method")
@@ -506,7 +681,7 @@ if str_method == "direct":
     prm['newton_solver']['relative_tolerance'] = 1E-08
     # prm['newton_solver']['maximum_iterations'] = 45
     # prm['newton_solver']['relaxation_parameter'] = 1.0
-    prm['newton_solver']['linear_solver'] = 'mumps'  # or petsc,mumps   #ZKUSIT cyl3, jinak paralelizace
+    prm['newton_solver']['linear_solver'] = 'mumps'  # or petsc,mumps
 
     # Time-stepping
     info("Running of direct method")
