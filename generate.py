@@ -16,7 +16,7 @@ R = 5.0
 
 PS = FunctionSpace(mesh, "Lagrange", 2)  # partial solution (must be same order as V)
 
-f = HDF5File(mpi_comm_world(), 'precomputed_'+meshName+'.hdf5','w')
+f = HDF5File(mpi_comm_world(), 'precomputed_'+meshName+'.hdf5', 'w')
 
 # precomputation of Bessel functions=============================================================================
 temp = toc()

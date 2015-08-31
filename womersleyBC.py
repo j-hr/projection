@@ -32,15 +32,17 @@ u_lambda = lambdify([r, tm], u, ['numpy', {'besselj': jv}])
 
 
 class WomersleyProfile(Expression):
-    def __init__(self):
+    def __init__(self, factor):
         self.t = 0
+        self.factor = factor
 
     def eval(self, value, x):
         rad = float(sqrt(x[0] * x[0] + x[1] * x[
             1]))  # conversion to float needed, u_lambda (and near) cannot use sympy Float as input
         value[0] = 0
         value[1] = 0
-        value[2] = 0 if near(rad, R) else re(factor * u_lambda(rad, self.t))  # do not evaluate on boundaries, it's 0
+        value[2] = 0 if near(rad, R) else re(self.factor * u_lambda(rad, self.t))  # do not evaluate on boundaries, it's 0
+        # print(x[0], x[1], x[2], rad, value[2])
 
     def value_shape(self):
         return (3,)

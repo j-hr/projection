@@ -157,18 +157,27 @@ class ResultsManager:
             out = HDF5File(mpi_comm_world(), 'solution_%s.hdf5' % mesh_name, 'w')
         else:
             exit('Unsupported file type.')
-        t = float(t_start)
         s = Function(solution_space)
-        while t < float(t_end) + DOLFIN_EPS:
-            print("t = ", t)
-            s.assign(self.assemble_solution(t, solution_space, factor))
-            if file_type == 'xdmf':
+        if file_type == 'hdf5':
+            t = int(float(t_start)*1000)
+            dt = int(float(dt)*1000)
+            t_end = int(round(float(t_end)*1000))
+            while t <= t_end:
+                print("t = ", t)
+                s.assign(self.assemble_solution(float(t)/1000.0, solution_space, factor))
+                # plot(s, mode = "glyphs", title = 'saved_hdf5', interactive = True)
+                out.write(s, 'sol'+str(t))
+                print('saved to hdf5, sol'+str(t))
+                t += dt
+        elif file_type == 'xdmf':
+            t = float(t_start)
+            while t <= float(t_end) + DOLFIN_EPS:
+                print("t = ", t)
+                s.assign(self.assemble_solution(t, solution_space, factor))
+                # plot(s, mode = "glyphs", title = 'saved_xdmf', interactive = True)
                 out << s
                 print('saved to xdmf')
-            elif file_type == 'hdf5':
-                out.write(s, str(round(1000 * t)))
-                print('saved to hdf5, '+str(int(round(1000 * t))))
-            t += float(dt)
+                t += float(dt)
 
     # load precomputed Bessel functions
     def load_precomputed_bessel_functions(self, mesh_name, PS):

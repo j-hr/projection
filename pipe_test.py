@@ -17,13 +17,12 @@ import results
 # Continue work
 # another projection methods (MiroK)
 # TODO ipcs0
-#   TODO implement pulsePrec variant (with precomputed pressure)
 # TODO ipcs1
 # TODO rotational scheme
 
 # Issues
 # QQ How to be sure that analytic solution is right?
-# TODO check compatibility of solution and inflow condition it should be equal
+#       Solution is right if womersleyBC.WomersleyProfile() is right.
 # TODO check if errornorm and integral give the same results
 # TODO cyl3 cannot be solved directly, pulsePrec also fails. try mumps, then paralelize
 # mesh.hmax() returns strange values >> hmin() is better
@@ -124,8 +123,7 @@ if str_type == "steady":
                        (factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1])))"),
                       t=0, factor=factor)
 elif str_type == "pulse0" or str_type == "pulsePrec":
-    womersleyBC.factor = factor
-    v_in = womersleyBC.WomersleyProfile()
+    v_in = womersleyBC.WomersleyProfile(factor)
 
 # Initial Conditions====================================================================================================
 if str_type == "pulsePrec":  # computes initial velocity as a solution of steady Stokes problem with input velocity v_in
