@@ -18,6 +18,7 @@ import results
 # another projection methods (MiroK)
 # TODO ipcs0 (in progress)
 # TODO ipcs1 (in progress)
+#   IMP resolve matrix assembly
 # TODO rotational scheme
 # TODO more accurate time measuring (count only solving in time loop)
 
@@ -81,7 +82,7 @@ str_method = sys.argv[1]
 print("Method:       " + str_method)
 hasTentativeVel = False
 if str_method == 'chorinExpl' or str_method == 'ipcs0' or str_method == 'ipcs0p' or str_method == 'ipcs1' or\
-        str_method == 'ipcs1p':
+        str_method == 'ipcs1p' or str_method == 'ipcs1a':
     hasTentativeVel = True
     rm.hasTentativeVel = True
 
@@ -457,7 +458,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
 # Incremental pressure correction with nonlinearity treated by Adam-Bashword + Crank-Nicolson. =========================
 # incremental = extrapolate pressure from previous steps (here: use previous step)
 # viscosity term treated semi-explicitly (Crank-Nicholson)
-if str_method == 'ipcs1' or str_method == 'ipcs1p':
+if str_method == 'ipcs1' or str_method == 'ipcs1p' or str_method == 'ipcs1a':
     info("Initialization of Incremental pressure correction scheme n. 1")
     tic()
 
@@ -570,7 +571,10 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         v_in.t = t
 
         # QQ missing assemble matrices?
-        A0 = assemble(a0)
+        if str_method == 'ipcs1a':
+            temp = toc()
+            A0 = assemble(a0)
+            print("Assembled A0 matrix. Time:%f" % (toc() - temp))
 
         # Compute tentative velocity step
         begin("Computing tentative velocity")
