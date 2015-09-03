@@ -16,6 +16,7 @@ class ResultsManager:
         self.str_dir_name = None
         self.doSave = None
         self.doErrControl = None
+        self.testErrControl = False
         self.measure_time = None
         self.hasTentativeVel = False
 
@@ -25,6 +26,8 @@ class ResultsManager:
         self.time_list = []  # list of times, when error is  measured (used in report)
         self.err_u = []
         self.err_u2 = []
+        self.err_ut = []
+        self.err_u2t = []
 
         self.div_u = []
         self.div_u2 = []
@@ -54,8 +57,12 @@ class ResultsManager:
             print("Error control omitted")
         else:
             self.doErrControl = True
-            if option == "-1":
-                self.measure_time = 0.5 if str_type == "steady" else 1
+            if option == "test":
+                self.measure_time = 0.0
+                self.testErrControl = True
+                print("Error control in testing mode")
+            elif option == "-1":
+                self.measure_time = 0.5 if str_type == "steady" else 1.0
             else:
                 self.measure_time = float(sys.argv[7])
             print("Error control from:       %4.2f s" % self.measure_time)
@@ -200,15 +207,19 @@ class ResultsManager:
     def compute_err(self, is_tent, velocity, t, str_type, V, factor):
         if self.doErrControl:
             er_list = self.err_u2 if is_tent else self.err_u
+            if self.testErrControl:
+                er_list_test = self.err_u2t if is_tent else self.err_ut
             if len(self.time_list) == 0 or (self.time_list[-1] < round(t, 3)):  # add only once per time step
                 self.time_list.append(round(t, 3))  # round time step to 0.001
             tmp = toc()
             if str_type == "steady":
-                # er_list.append(pow(errornorm(velocity, solution, norm_type='l2', degree_rise=0),2)) # slower, reliable
+                if self.testErrControl:
+                    er_list_test.append(errornorm(velocity, self.solution, norm_type='l2', degree_rise=0))
                 er_list.append(assemble(inner(velocity - self.solution, velocity - self.solution) * dx))  # faster
             elif (str_type == "pulse0") or (str_type == "pulsePrec"):
-                # er_list.append(pow(errornorm(velocity, assembleSolution(t), norm_type='l2', degree_rise=0),2))
                 sol = self.assemble_solution(t, V, factor)
+                if self.testErrControl:
+                    er_list_test.append(errornorm(velocity, sol, norm_type='l2', degree_rise=0))
                 er_list.append(assemble(inner(velocity - sol, velocity - sol) * dx))  # faster
             terc = toc() - tmp
             self.time_erc += terc
@@ -258,8 +269,12 @@ class ResultsManager:
                 report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
                 report_writer.writerow(["name"] + ["time"] + self.time_list)
                 report_writer.writerow([str_name] + ["corrected"] + self.err_u)
+                if self.testErrControl:
+                    report_writer.writerow([str_name] + ["corrected_errornorm"] + self.err_ut)
                 if self.hasTentativeVel:
                     report_writer.writerow([str_name] + ["tentative"] + self.err_u2)
+                    if self.testErrControl:
+                        report_writer.writerow([str_name] + ["tentative_errornorm"] + self.err_u2t)
 
         # report of norm of div for individual time steps
         with open(self.str_dir_name + "/report_div.csv", 'w') as reportFile:
