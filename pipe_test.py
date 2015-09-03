@@ -20,13 +20,10 @@ import results
 # TODO ipcs1 (in progress)
 #   IMP resolve matrix assembly
 # TODO rotational scheme
-# TODO more accurate time measuring (count only solving in time loop)
 
 # Issues
 # QQ How to be sure that analytic solution is right?
 #       Solution is right if womersleyBC.WomersleyProfile() is right.
-# TODO check if errornorm and integral give the same results
-# TODO cyl3 cannot be solved directly, pulsePrec also fails. try mumps, then paralelize
 # mesh.hmax() returns strange values >> hmin() is better
 #   Mesh name:  cyl_c1      <Mesh of topological dimension 3 (tetrahedra) with 280 vertices and 829 cells, ordered>
 #   Mesh norm max:  6.23747141372
