@@ -220,7 +220,9 @@ class ResultsManager:
                 sol = self.assemble_solution(t, V, factor)
                 if self.testErrControl:
                     er_list_test.append(errornorm(velocity, sol, norm_type='l2', degree_rise=0))
-                er_list.append(assemble(inner(velocity - sol, velocity - sol) * dx))  # faster
+                error = assemble(inner(velocity - sol, velocity - sol) * dx)
+                print("  Error in velocity = ", math.sqrt(error))
+                er_list.append(error)  # faster
             terc = toc() - tmp
             self.time_erc += terc
             print("Computed errornorm. Time: %f, Total: %f" % (terc, self.time_erc))

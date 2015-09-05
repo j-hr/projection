@@ -18,8 +18,8 @@ import results
 # another projection methods (MiroK)
 # TODO ipcs0 (in progress)
 # TODO ipcs1 (in progress)
-#   IMP resolve matrix assembly
 # TODO rotational scheme
+# FUTURE ? SUPG stabilisation
 
 # Issues
 # QQ How to be sure that analytic solution is right?
@@ -44,16 +44,20 @@ import results
 #   c3: 53056 cells => h = 0.31 mm => 0.28 ms/factor
 
 tic()
+
+# set_log_level(PROGRESS)
+# set_log_level(DEBUG)
+
 # Resolve input arguments===============================================================================================
 print(sys.argv)
-nargs = 9
+nargs = 10
 arguments = "method type mesh_name T dt(minimal: 0.001) factor \
-error_control_start_time(-1 for default starting time, 0 for no errc.) save_results(save/noSave) name"
+error_control_start_time(-1 for default starting time, 0 for no errc.) save_results(save/noSave) solvers name"
 if len(sys.argv) != nargs + 1:
     exit("Wrong number of arguments. Should be: %d (%s)" % (nargs, arguments))
 
 # name used for result folders and report files
-str_name = sys.argv[9]
+str_name = sys.argv[10]
 
 # choose type of flow:
 #   steady - parabolic profile (0.5 s onset)
@@ -74,18 +78,38 @@ rm.set_save_mode(sys.argv[8])
 #   -1 default option (start measuring error at 0.5 for steady and 1.0 for unsteady flow)
 rm.set_error_control_mode(sys.argv[7], str_type)
 
-# choose a method: direct, chorinExpl, ipcs0, ipcs0p
+# choose a method: direct, chorinExpl, ipcs0, ipcs0p, ipcs1, ipcs1p
 str_method = sys.argv[1]
 print("Method:       " + str_method)
 hasTentativeVel = False
 if str_method == 'chorinExpl' or str_method == 'ipcs0' or str_method == 'ipcs0p' or str_method == 'ipcs1' or\
-        str_method == 'ipcs1p' or str_method == 'ipcs1a':
+        str_method == 'ipcs1p':
     hasTentativeVel = True
     rm.hasTentativeVel = True
 
 pressure_BC = True
 if str_method == 'ipcs0p' or str_method == 'ipcs1p':
     pressure_BC = False
+
+# choose which solvers to use in projection methods
+#   default
+#   direct
+#   precision (criterion 10*E-?): use integers from 4 to 12 TODO test it
+str_solvers = sys.argv[9]
+useDirect = True
+precision = 0
+if str_method == 'direct':
+    if str_solvers != 'default':
+        exit('Parameter solvers should be \'default\' when using direct method.')
+else:
+    if str_solvers == 'default':
+        print('Chosen direct solvers.')  # TODO select default option
+    elif str_solvers == 'direct':
+        print('Chosen direct solvers.')
+    else:
+        precision = int(str_solvers)
+        useDirect = False
+        print('Chosen Krylov solvers.')
 
 # Set parameter values
 dt = float(sys.argv[5])
@@ -154,6 +178,7 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     F = (inner(T(u), grad(v)) - q * div(u)) * dx
     try:
         # lhs(F) == rhs(F) means that is a linear problem
+        PETScOptions.set('mat_mumps_icntl_4', 0)  # 1-3 gives lots of information
         solve(lhs(F) == rhs(F), w, bcu, solver_parameters={'linear_solver': 'mumps'})
     except RuntimeError as inst:
         rm.report_fail(str_name, factor, dt, t)
@@ -328,16 +353,6 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
     k = Constant(dt)
     f = Constant((0, 0, 0))
 
-    # ===================
-    # # Define functions
-    # n = FacetNormal(mesh) # QQ where is it used in MiroK's code?
-    #
-    # # Now that u0, p0 are functions, make sure that they comply with boundary
-    # # conditions. # QQ what does it do?
-    # bcs = {'u' : bcs_u, 'p' : bcs_p}
-    # ics = {'u' : u0, 'p' : p0}
-    # self.apply_bcs_to_ics(bcs, ics)
-
     # Tentative velocity, solve to u1
     U = 0.5*(u + u0)
     F0 = (1./k)*inner(u - u0, v)*dx + inner(dot(grad(u0), u0), v)*dx\
@@ -360,32 +375,34 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
 
     # Create solvers; solver02 for tentative and finalize
     #                 solver1 for projection
-    solver02 = KrylovSolver('gmres', 'hypre_euclid')   # QQ why these?
-    solver1 = KrylovSolver('cg', 'hypre_amg')          # QQ why these?
+    options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': True}
+    if str_solvers == 'direct':
+        solver02 = LUSolver('mumps')
+        solver1 = LUSolver('mumps')
+    else:
+        solver02 = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
+        solver1 = KrylovSolver('cg', 'hypre_amg')          # symmetric > CG
+        options = {'absolute_tolerance': 10**(-precision), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True}
 
     # Get the nullspace if there are no pressure boundary conditions
     foo = Function(Q)     # auxiliary vector for setting pressure nullspace
-    if not bcp:                               # QQ what happens here?
+    if not bcp:
         null_vec = Vector(foo.vector())
         Q.dofmap().set(null_vec, 1.0)
         null_vec *= 1.0/null_vec.norm('l2')
         null_space = VectorSpaceBasis([null_vec])
         solver1.set_nullspace(null_space)
 
-    # apply global options for Krylov solvers # QQ what to use? These are default settings in ns.py
-    options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': False}
-    for solver in [solver02, solver1]:
-        for key, value in options.items():
-            try:
-                solver.parameters[key] = value
-            except KeyError:
-                print('Invalid option %s for KrylovSolver' % key)
-                exit()
-        # reuse the preconditioner
-        try:
+    # apply global options for Krylov solvers
+    if str_solvers != 'direct':
+        for solver in [solver02, solver1]:
+            for key, value in options.items():
+                try:
+                    solver.parameters[key] = value
+                except KeyError:
+                    print('Invalid option %s for KrylovSolver' % key)
+                    exit()
             solver.parameters['preconditioner']['structure'] = 'same'
-        except KeyError:
-            solver.parameters['preconditioner']['reuse'] = True
 
     # Time-stepping
     info("Running of Incremental pressure correction scheme n. 0")
@@ -396,8 +413,6 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
 
         # Update boundary condition
         v_in.t = t
-
-        # QQ missing assemble matrices?
 
         # Compute tentative velocity step
         begin("Computing tentative velocity")
@@ -455,7 +470,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
 # Incremental pressure correction with nonlinearity treated by Adam-Bashword + Crank-Nicolson. =========================
 # incremental = extrapolate pressure from previous steps (here: use previous step)
 # viscosity term treated semi-explicitly (Crank-Nicholson)
-if str_method == 'ipcs1' or str_method == 'ipcs1p' or str_method == 'ipcs1a':
+if str_method == 'ipcs1' or str_method == 'ipcs1p':
     info("Initialization of Incremental pressure correction scheme n. 1")
     tic()
 
@@ -481,7 +496,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p' or str_method == 'ipcs1a':
 
     if str_type == "pulsePrec":
         assign(u0, u_prec)
-        assign(u1, u_prec)  # QQ how to deal with initial conditions?
+        assign(u1, u_prec)
         assign(p0, p_prec)
     if rm.doSave:
         rm.save_vel(False, u0)
@@ -493,16 +508,6 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p' or str_method == 'ipcs1a':
     # Define coefficients
     k = Constant(dt)
     f = Constant((0, 0, 0))
-
-    # ===================
-    # # Define functions
-    # n = FacetNormal(mesh)
-    #
-    # # Now that u0, p0 are functions, make sure that they comply with boundary
-    # # conditions.
-    # bcs = {'u' : bcs_u, 'p' : bcs_p}
-    # ics = {'u' : u0, 'p' : p0}
-    # self.apply_bcs_to_ics(bcs, ics)
 
     # Tentative velocity, solve to u_
     U = 0.5*(u + u0)
@@ -530,8 +535,14 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p' or str_method == 'ipcs1a':
 
     # Create solvers; solver02 for tentative and finalize
     #                 solver1 for projection
-    solver02 = KrylovSolver('gmres', 'hypre_euclid')
-    solver1 = KrylovSolver('cg', 'hypre_amg')
+    options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': True}
+    if str_solvers == 'direct':
+        solver02 = LUSolver('mumps')
+        solver1 = LUSolver('mumps')
+    else:
+        solver02 = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
+        solver1 = KrylovSolver('cg', 'hypre_amg')          # symmetric > CG
+        options = {'absolute_tolerance': 10**(-precision), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True}
 
     # Get the nullspace if there are no pressure boundary conditions
     foo = Function(Q)     # auxiliary vector for setting pressure nullspace
@@ -543,7 +554,6 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p' or str_method == 'ipcs1a':
         solver1.set_nullspace(null_space)
 
     # apply global options for Krylov solvers
-    options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': False}
     for solver in [solver02, solver1]:
         for key, value in options.items():
             try:
@@ -551,11 +561,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p' or str_method == 'ipcs1a':
             except KeyError:
                 print('Invalid option %s for KrylovSolver' % key)
                 exit()
-        # reuse the preconditioner
-        try:
-            solver.parameters['preconditioner']['structure'] = 'same'
-        except KeyError:
-            solver.parameters['preconditioner']['reuse'] = True
+        solver.parameters['preconditioner']['structure'] = 'same'
 
     # Time-stepping
     info("Running of Incremental pressure correction scheme n. 1")
@@ -567,11 +573,10 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p' or str_method == 'ipcs1a':
         # Update boundary condition
         v_in.t = t
 
-        # QQ missing assemble matrices?
-        if str_method == 'ipcs1a':
-            temp = toc()
-            A0 = assemble(a0)
-            print("Assembled A0 matrix. Time:%f" % (toc() - temp))
+        # assemble matrix (ir depends on solution)
+        temp = toc()
+        A0 = assemble(a0)
+        print("Assembled A0 matrix. Time:%f" % (toc() - temp))
 
         # Compute tentative velocity step
         begin("Computing tentative velocity")
@@ -682,7 +687,7 @@ if str_method == "direct":
     prm['newton_solver']['relative_tolerance'] = 1E-08
     # prm['newton_solver']['maximum_iterations'] = 45
     # prm['newton_solver']['relaxation_parameter'] = 1.0
-    prm['newton_solver']['linear_solver'] = 'mumps'  # or petsc,mumps
+    prm['newton_solver']['linear_solver'] = 'mumps'  # TODO try 'superlu' (for killed)
 
     # Time-stepping
     info("Running of direct method")
