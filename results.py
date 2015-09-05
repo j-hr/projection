@@ -228,7 +228,7 @@ class ResultsManager:
             print("Computed errornorm. Time: %f, Total: %f" % (terc, self.time_erc))
 
 # Reports ==============================================================================================================
-    def report(self, dt, ttime, str_name, str_type, str_method, mesh_name, mesh, factor):
+    def report(self, dt, ttime, str_name, str_type, str_method, mesh_name, mesh, factor, str_solver):
         total = toc()
         total_err_u = 0
         total_err_u2 = 0
@@ -289,7 +289,7 @@ class ResultsManager:
         with open(self.str_dir_name + "/report.csv", 'w') as reportFile:
             report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
             report_writer.writerow(
-                ["pipe_test"] + [str_name] + [str_type] + [str_method] + [mesh_name] + [mesh] + [factor] + [ttime] + [dt] + [
+                ["pipe_test"] + [str_name] + [str_type] + [str_method] + [mesh_name] + [mesh] + [str_solver] + [factor] + [ttime] + [dt] + [
                     total - self.time_erc] + [self.time_erc] + [total_err_u] + [total_err_u2] + [avg_err_u] + [avg_err_u2] + [
                     last_cycle_err_u] + [last_cycle_err_u2] + [last_cycle_div] + [last_cycle_div2] + [last_cycle_err_min] + [
                     last_cycle_err_max] + [last_cycle_err_min2] + [last_cycle_err_max2])
@@ -298,12 +298,12 @@ class ResultsManager:
         with open(self.str_dir_name + "/report_h.csv", 'w') as reportFile:
             report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
             report_writer.writerow(
-                ["problem"] + ["name"] + ["type"] + ["method"] + ["mesh_name"] + ["mesh"] + ["factor"] + ["time"] + ["dt"] + [
+                ["problem"] + ["name"] + ["type"] + ["method"] + ["mesh_name"] + ["mesh"] + ["solver"] + ["factor"] + ["time"] + ["dt"] + [
                     "timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"] + ["avg_err_u"] + [
                     "avg_err_u2"] + ["last_cycle_err_u"] + ["last_cycle_err_u2"] + ["last_cycle_div"] + ["last_cycle_div2"] + [
                     "last_cycle_err_min"] + ["last_cycle_err_max"] + ["last_cycle_err_min2"] + ["last_cycle_err_max2"])
             report_writer.writerow(
-                ["pipe_test"] + [str_name] + [str_type] + [str_method] + [mesh_name] + [mesh] + [factor] + [ttime] + [dt] + [
+                ["pipe_test"] + [str_name] + [str_type] + [str_method] + [mesh_name] + [mesh] + [str_solver] + [factor] + [ttime] + [dt] + [
                     total - self.time_erc] + [self.time_erc] + [total_err_u] + [total_err_u2] + [avg_err_u] + [avg_err_u2] + [
                     last_cycle_err_u] + [last_cycle_err_u2] + [last_cycle_div] + [last_cycle_div2] + [last_cycle_err_min] + [
                     last_cycle_err_max] + [last_cycle_err_min2] + [last_cycle_err_max2])

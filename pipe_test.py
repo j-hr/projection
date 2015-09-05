@@ -95,21 +95,26 @@ if str_method == 'ipcs0p' or str_method == 'ipcs1p':
 #   default
 #   direct
 #   precision (criterion 10*E-?): use integers from 4 to 12 TODO test it
-str_solvers = sys.argv[9]
+str_solver = sys.argv[9]
 useDirect = True
 precision = 0
 if str_method == 'direct':
-    if str_solvers != 'default':
+    if str_solver != 'default':
         exit('Parameter solvers should be \'default\' when using direct method.')
 else:
-    if str_solvers == 'default':
-        print('Chosen direct solvers.')  # TODO select default option
-    elif str_solvers == 'direct':
-        print('Chosen direct solvers.')
-    else:
-        precision = int(str_solvers)
+    if str_solver == 'default':
+        precision = 4
         useDirect = False
         print('Chosen Krylov solvers.')
+    elif str_solver == 'direct':
+        print('Chosen direct solvers.')
+    else:
+        precision = int(str_solver)
+        useDirect = False
+        print('Chosen Krylov solvers.')
+
+str_solver += ' ' + str(precision)
+options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': True}
 
 # Set parameter values
 dt = float(sys.argv[5])
@@ -251,6 +256,25 @@ if str_method == "chorinExpl":
     prec = "amg" if has_krylov_solver_preconditioner("amg") else "default"
     info("Preconditioning: " + prec)
 
+    # Create solvers; solver02 for tentative and finalize
+    #                 solver1 for projection
+    if useDirect:
+        solver02 = LUSolver('mumps')
+        solver1 = LUSolver('mumps')
+    else:
+        solver02 = KrylovSolver('gmres', 'default')   # nonsymetric > gmres
+        solver1 = KrylovSolver('cg', prec)          # symmetric > CG
+        options = {'absolute_tolerance': 10**(-precision), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True}
+        # apply global options for Krylov solvers
+        for solver in [solver02, solver1]:
+            for key, value in options.items():
+                try:
+                    solver.parameters[key] = value
+                except KeyError:
+                    print('Invalid option %s for KrylovSolver' % key)
+                    exit()
+            solver.parameters['preconditioner']['structure'] = 'same'
+
     # Time-stepping
     info("Running of explicit Chorin method")
     t = dt
@@ -266,7 +290,7 @@ if str_method == "chorinExpl":
         b1 = assemble(L1)
         [bc.apply(A1, b1) for bc in bcu]  # PYTHON syntax
         try:
-            solve(A1, u1.vector(), b1, "gmres", "default")
+            solver02.solve(A1, u1.vector(), b1)
         except RuntimeError as inst:
             rm.report_fail(str_name, factor, dt, t)
             exit()
@@ -283,7 +307,7 @@ if str_method == "chorinExpl":
         b2 = assemble(L2)
         [bc.apply(A2, b2) for bc in bcp]
         try:
-            solve(A2, p1.vector(), b2, "cg", prec)
+            solver1.solve(A2, p1.vector(), b2)
         except RuntimeError as inst:
             rm.report_fail(str_name, factor, dt, t)
             exit()
@@ -375,8 +399,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
 
     # Create solvers; solver02 for tentative and finalize
     #                 solver1 for projection
-    options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': True}
-    if str_solvers == 'direct':
+    if useDirect:
         solver02 = LUSolver('mumps')
         solver1 = LUSolver('mumps')
     else:
@@ -394,7 +417,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         solver1.set_nullspace(null_space)
 
     # apply global options for Krylov solvers
-    if str_solvers != 'direct':
+    if not useDirect:
         for solver in [solver02, solver1]:
             for key, value in options.items():
                 try:
@@ -535,8 +558,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
 
     # Create solvers; solver02 for tentative and finalize
     #                 solver1 for projection
-    options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': True}
-    if str_solvers == 'direct':
+    if useDirect:
         solver02 = LUSolver('mumps')
         solver1 = LUSolver('mumps')
     else:
@@ -554,14 +576,15 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         solver1.set_nullspace(null_space)
 
     # apply global options for Krylov solvers
-    for solver in [solver02, solver1]:
-        for key, value in options.items():
-            try:
-                solver.parameters[key] = value
-            except KeyError:
-                print('Invalid option %s for KrylovSolver' % key)
-                exit()
-        solver.parameters['preconditioner']['structure'] = 'same'
+    if not useDirect:
+        for solver in [solver02, solver1]:
+            for key, value in options.items():
+                try:
+                    solver.parameters[key] = value
+                except KeyError:
+                    print('Invalid option %s for KrylovSolver' % key)
+                    exit()
+            solver.parameters['preconditioner']['structure'] = 'same'
 
     # Time-stepping
     info("Running of Incremental pressure correction scheme n. 1")
@@ -728,4 +751,4 @@ if str_method == "direct":
     info("Finished: direct method")
 
 # Report
-rm.report(dt, ttime, str_name, str_type, str_method, meshName, mesh, factor)
+rm.report(dt, ttime, str_name, str_type, str_method, meshName, mesh, factor, str_solver)
