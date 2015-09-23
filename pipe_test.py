@@ -20,6 +20,7 @@ import results
 # TODO ipcs1 (in progress)
 # TODO rotational scheme
 # FUTURE ? SUPG stabilisation
+# FUTURE ? Adaptive time step
 
 # Issues
 # QQ How to be sure that analytic solution is right?
@@ -45,8 +46,10 @@ import results
 
 tic()
 
-# set_log_level(PROGRESS)
+# Debugging ============================================================================================================
 # set_log_level(DEBUG)
+PETScOptions.set('mat_mumps_icntl_4', 0)  # 1-3 gives lots of information for mumps direct solvers
+
 
 # Resolve input arguments===============================================================================================
 print(sys.argv)
@@ -69,6 +72,7 @@ print("Problem type: " + str_type)
 
 # save mode
 #   save: create .xdmf files with velocity, pressure, divergence
+#   diff: save also difference vel-sol
 #   noSave: do not create .xdmf files with velocity, pressure, divergence
 rm = results.ResultsManager()
 rm.set_save_mode(sys.argv[8])
@@ -183,10 +187,9 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     F = (inner(T(u), grad(v)) - q * div(u)) * dx
     try:
         # lhs(F) == rhs(F) means that is a linear problem
-        PETScOptions.set('mat_mumps_icntl_4', 0)  # 1-3 gives lots of information
         solve(lhs(F) == rhs(F), w, bcu, solver_parameters={'linear_solver': 'mumps'})
     except RuntimeError as inst:
-        rm.report_fail(str_name, factor, dt, t)
+        rm.report_fail(str_name, dt, t)
         exit()
     # Extract solutions:
     (u_prec, p_prec) = w.split()
@@ -197,9 +200,12 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     # exit()
 
 # Output and error control =============================================================================================
+inflow_point = Point(0.0, 0.0, -10.0)
+outflow_point = Point(0.0, 0.0, 10.0)
+
 rm.initialize_output(V, mesh, "%sresults_%s_%s_%s_factor%4.2f_%ds_%dms" % (str_name, str_type, str_method, meshName,
                                                                            factor, ttime, dt * 1000))
-rm.initialize_error_control(str_type, factor, PS, V, meshName)
+rm.initialize_error_control(factor, PS, V, meshName)
 
 # Explicit Chorin method================================================================================================
 if str_method == "chorinExpl":
@@ -224,8 +230,8 @@ if str_method == "chorinExpl":
     if str_type == "pulsePrec":
         assign(u0, u_prec)
     if rm.doSave:
-        rm.save_vel(False, u0)
-        rm.save_vel(True, u0)
+        rm.save_vel(False, u0, 0.0)
+        rm.save_vel(True, u0, 0.0)
     u1 = Function(V)
     p1 = Function(Q)
 
@@ -292,13 +298,13 @@ if str_method == "chorinExpl":
         try:
             solver02.solve(A1, u1.vector(), b1)
         except RuntimeError as inst:
-            rm.report_fail(str_name, factor, dt, t)
+            rm.report_fail(str_name, dt, t)
             exit()
         if do_EC:
-            rm.compute_err(True, u1, t, str_type, V, factor)
+            rm.compute_err(True, u1, t)
         rm.compute_div(True, u1)
         if rm.doSave:
-            rm.save_vel(True, u1)
+            rm.save_vel(True, u1, t)
             rm.save_div(True, u1)
         end()
 
@@ -309,7 +315,7 @@ if str_method == "chorinExpl":
         try:
             solver1.solve(A2, p1.vector(), b2)
         except RuntimeError as inst:
-            rm.report_fail(str_name, factor, dt, t)
+            rm.report_fail(str_name, dt, t)
             exit()
         if rm.doSave:
             rm.pFile << p1
@@ -322,13 +328,13 @@ if str_method == "chorinExpl":
         try:
             solve(A3, u1.vector(), b3, "gmres", "default")
         except RuntimeError as inst:
-            rm.report_fail(str_name, factor, dt, t)
+            rm.report_fail(str_name, dt, t)
             exit()
         if do_EC:
-            rm.compute_err(False, u1, t, str_type, V, factor)
+            rm.compute_err(False, u1, t)
         rm.compute_div(False, u1)
         if rm.doSave:
-            rm.save_vel(False, u1)
+            rm.save_vel(False, u1, t)
             rm.save_div(False, u1)
         end()
 
@@ -367,8 +373,8 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         assign(u0, u_prec)
         assign(p0, p_prec)
     if rm.doSave:
-        rm.save_vel(False, u0)
-        rm.save_vel(True, u0)
+        rm.save_vel(False, u0, 0.0)
+        rm.save_vel(True, u0, 0.0)
 
     u1 = Function(V)
     p1 = Function(Q)
@@ -444,13 +450,13 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         try:
             solver02.solve(A0, u1.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, factor, dt, t)
+            rm.report_fail(str_name, dt, t)
             exit()
         if do_EC:
-            rm.compute_err(True, u1, t, str_type, V, factor)
+            rm.compute_err(True, u1, t)
         rm.compute_div(True, u1)
         if rm.doSave:
-            rm.save_vel(True, u1)
+            rm.save_vel(True, u1, t)
             rm.save_div(True, u1)
         end()
 
@@ -462,7 +468,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         try:
             solver1.solve(A1, p1.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, factor, dt, t)
+            rm.report_fail(str_name, dt, t)
             exit()
         if rm.doSave:
             rm.pFile << p1
@@ -473,13 +479,13 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         try:
             solver02.solve(A2, u1.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, factor, dt, t)
+            rm.report_fail(str_name, dt, t)
             exit()
         if do_EC:
-            rm.compute_err(False, u1, t, str_type, V, factor)
+            rm.compute_err(False, u1, t)
         rm.compute_div(False, u1)
         if rm.doSave:
-            rm.save_vel(False, u1)
+            rm.save_vel(False, u1, t)
             rm.save_div(False, u1)
         end()
 
@@ -522,8 +528,8 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         assign(u1, u_prec)
         assign(p0, p_prec)
     if rm.doSave:
-        rm.save_vel(False, u0)
-        rm.save_vel(True, u0)
+        rm.save_vel(False, u0, 0.0)
+        rm.save_vel(True, u0, 0.0)
 
     u_ = Function(V)         # current velocity
     p_ = Function(Q)         # current pressure
@@ -563,7 +569,8 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         solver1 = LUSolver('mumps')
     else:
         solver02 = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
-        solver1 = KrylovSolver('cg', 'hypre_amg')          # symmetric > CG
+        solver1 = KrylovSolver('cg', 'hypre_amg')          # NT this, with disabled setnullspace gives same oscilations
+        # solver1 = KrylovSolver('gmres', 'hypre_amg')          # symmetric > CG
         options = {'absolute_tolerance': 10**(-precision), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True}
 
     # Get the nullspace if there are no pressure boundary conditions
@@ -573,7 +580,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         Q.dofmap().set(null_vec, 1.0)
         null_vec *= 1.0/null_vec.norm('l2')
         null_space = VectorSpaceBasis([null_vec])
-        solver1.set_nullspace(null_space)
+        solver1.set_nullspace(null_space)  # IMP deprecated for KrylovSolver, not working for direct solver
 
     # apply global options for Krylov solvers
     if not useDirect:
@@ -608,13 +615,13 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         try:
             solver02.solve(A0, u_.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, factor, dt, t)
+            rm.report_fail(str_name, dt, t)
             exit()
         if do_EC:
-            rm.compute_err(True, u_, t, str_type, V, factor)
+            rm.compute_err(True, u_, t)
         rm.compute_div(True, u_)
         if rm.doSave:
-            rm.save_vel(True, u_)
+            rm.save_vel(True, u_, t)
             rm.save_div(True, u_)
         end()
 
@@ -626,24 +633,28 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         try:
             solver1.solve(A1, p_.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, factor, dt, t)
+            rm.report_fail(str_name, dt, t)
             exit()
         if rm.doSave:
             rm.pFile << p_
         end()
+
+        # Report pressure gradient
+        p_diff = (p_(outflow_point) - p_(inflow_point))/20.0  # 20.0 is a length of a pipe
+        rm.save_p_diff(p_diff, womersleyBC.analytic_pressure_grad(factor, t))
 
         b = assemble(L2)
         [bc.apply(A2, b) for bc in bcu]
         try:
             solver02.solve(A2, u_.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, factor, dt, t)
+            rm.report_fail(str_name, dt, t)
             exit()
         if do_EC:
-            rm.compute_err(False, u_, t, str_type, V, factor)
+            rm.compute_err(False, u_, t)
         rm.compute_div(False, u_)
         if rm.doSave:
-            rm.save_vel(False, u_)
+            rm.save_vel(False, u_, t)
             rm.save_div(False, u_)
         end()
 
@@ -687,7 +698,7 @@ if str_method == "direct":
     if str_type == "pulsePrec":
         assign(u0, u_prec)
     if rm.doSave:
-        rm.save_vel(False, u0)
+        rm.save_vel(False, u0, 0.0)
 
     # Define steady part of the equation
     def T(u):
@@ -726,7 +737,7 @@ if str_method == "direct":
         try:
             NS_solver.solve()
         except RuntimeError as inst:
-            rm.report_fail(str_name, factor, dt, t)
+            rm.report_fail(str_name, dt, t)
             exit()
         end()
 
@@ -737,12 +748,12 @@ if str_method == "direct":
         #   projection (we can split save_vel to save one assign)
         fa.assign(velSp, u)
         if rm.doSave:
-            rm.save_vel(False, velSp)
+            rm.save_vel(False, velSp, t)
             rm.save_div(False, u)
             rm.pFile << p
         rm.compute_div(False, u)
         if do_EC:
-            rm.compute_err(False, u, t, str_type, V, factor)
+            rm.compute_err(False, u, t)
 
         # Move to next time step
         assign(u0, u)
