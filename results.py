@@ -18,7 +18,6 @@ class ResultsManager:
         self.doSaveDiff = False
         self.doErrControl = None
         self.testErrControl = False
-        self.measure_time = None
         self.hasTentativeVel = False
         self.isSteadyFlow = None
 
@@ -32,6 +31,14 @@ class ResultsManager:
         self.err_u2 = []
         self.err_ut = []
         self.err_u2t = []
+        self.isWholeSecond = False
+        self.stepsInSecond = None
+        self.second_list = []
+        self.second_err_u = []
+        self.second_err_div = []
+        self.second_err_u2 = []
+        self.second_err_div2 = []
+        self.second_err_pg = []
 
         self.div_u = []
         self.div_u2 = []
@@ -69,20 +76,16 @@ class ResultsManager:
             self.isSteadyFlow = True
         else:
             self.isSteadyFlow = False
-        if option == "0":
+        if option == "noEC":
             self.doErrControl = False
             print("Error control omitted")
         else:
             self.doErrControl = True
             if option == "test":
-                self.measure_time = 0.0
                 self.testErrControl = True
                 print("Error control in testing mode")
-            elif option == "-1":
-                self.measure_time = 0.5 if self.isSteadyFlow else 1.0
             else:
-                self.measure_time = float(sys.argv[7])
-            print("Error control from:       %4.2f s" % self.measure_time)
+                print("Error control on")
 
 # Output control========================================================================================================
     def initialize_xdmf_files(self):
@@ -118,10 +121,14 @@ class ResultsManager:
             self.divFunction = Function(self.D)
             self.initialize_xdmf_files()
 
-    def do_compute_error(self, time_step):
-        if not self.doErrControl:
-            return False
-        return round(time_step, 3) >= self.measure_time
+    def update_time(self, actual_time):
+        actual_time = round(actual_time, 3)
+        self.time_list.append(actual_time)  # round time step to 0.001
+        if actual_time > 0.5 and int(actual_time * 1000) % 1000 == 0:
+            self.isWholeSecond = True
+            self.second_list.append(actual_time)
+        else:
+            self.isWholeSecond = False
 
     # method for saving divergence (ensuring, that it will be one time line in ParaView)
     def save_div(self, is_tent, field):
@@ -135,6 +142,10 @@ class ResultsManager:
         self.p_diff.append(computed_gradient)
         self.p_diff_analytic.append(analytic_gradient)
         self.p_diff_err.append(abs(computed_gradient-analytic_gradient))
+        if self.isWholeSecond:
+            N1 = len(self.p_diff_err)
+            N0 = N1 - self.stepsInSecond
+            self.second_err_pg.append(sum(self.p_diff_err[N0:N1]))
 
     # method for saving velocity (ensuring, that it will be one time line in ParaView)
     def save_vel(self, is_tent, field, t):
@@ -161,12 +172,19 @@ class ResultsManager:
         div_list = self.div_u2 if isTent else self.div_u
         tmp = toc()
         div_list.append(norm(velocity, 'Hdiv0'))
+        if self.isWholeSecond:
+            sec_div_list = self.second_err_div2 if isTent else self.second_err_div
+            N1 = len(div_list)
+            N0 = N1 - self.stepsInSecond
+            sec_div_list.append(sum(div_list[N0:N1]))
+
         print("Computed norm of divergence. Time: %f" % (toc() - tmp))
 
 # Error control=========================================================================================================
-    def initialize_error_control(self, factor, PS, V, mesh_name):
+    def initialize_error_control(self, factor, PS, V, mesh_name, dt):
         self.solutionSpace = V
         self.factor = float(factor)
+        self.stepsInSecond = int(round(1.0 / dt))
         if self.doErrControl:
             if not self.isSteadyFlow:
                 self.load_precomputed_bessel_functions(mesh_name, PS)
@@ -244,8 +262,6 @@ class ResultsManager:
             er_list = self.err_u2 if is_tent else self.err_u
             if self.testErrControl:
                 er_list_test = self.err_u2t if is_tent else self.err_ut
-            if len(self.time_list) == 0 or (self.time_list[-1] < round(t, 3)):  # add only once per time step
-                self.time_list.append(round(t, 3))  # round time step to 0.001
             tmp = toc()
             if self.isSteadyFlow:
                 if self.testErrControl:
@@ -258,6 +274,11 @@ class ResultsManager:
                 error = assemble(inner(velocity - sol, velocity - sol) * dx)
                 print("  Error in velocity = ", math.sqrt(error))
                 er_list.append(error)  # faster
+            if self.isWholeSecond:
+                sec_err_list = self.second_err_u2 if is_tent else self.second_err_u
+                N1 = len(er_list)
+                N0 = N1 - self.stepsInSecond
+                sec_err_list.append(math.sqrt(sum(er_list[N0:N1])))
             terc = toc() - tmp
             self.time_erc += terc
             print("Computed errornorm. Time: %f, Total: %f" % (terc, self.time_erc))
@@ -292,46 +313,55 @@ class ResultsManager:
 
             avg_err_u = total_err_u / math.sqrt(len(self.time_list))
             avg_err_u2 = total_err_u2 / math.sqrt(len(self.time_list))
-            if ttime >= self.measure_time + 1 - DOLFIN_EPS:
-                N = 1.0 / dt
-                N0 = int(round(len(self.time_list) - N))
-                N1 = int(round(len(self.time_list)))
-                # last_cycle = time_list[N0:N1]
-                # print("N: ",N," len: ",len(last_cycle), " list: ",last_cycle)
-                last_cycle_err_u = math.sqrt(sum(self.err_u[N0:N1]) / N)
-                last_cycle_div = sum(self.div_u[N0:N1]) / N
-                last_cycle_err_min = math.sqrt(min(self.err_u[N0:N1]))
-                last_cycle_err_max = math.sqrt(max(self.err_u[N0:N1]))
-                if self.hasTentativeVel:
-                    last_cycle_err_u2 = math.sqrt(sum(self.err_u2[N0:N1]) / N)
-                    last_cycle_div2 = sum(self.div_u2[N0:N1]) / N
-                    last_cycle_err_min2 = math.sqrt(min(self.err_u2[N0:N1]))
-                    last_cycle_err_max2 = math.sqrt(max(self.err_u2[N0:N1]))
+
+            # last_cycle = time_list[N0:N1]
+            # print("N: ",N," len: ",len(last_cycle), " list: ",last_cycle)
+            last_cycle_err_u = math.sqrt(sum(self.err_u[N0:N1]) * dt)
+            last_cycle_div = sum(self.div_u[N0:N1]) * dt
+            last_cycle_err_min = math.sqrt(min(self.err_u[N0:N1]))
+            last_cycle_err_max = math.sqrt(max(self.err_u[N0:N1]))
+            if self.hasTentativeVel:
+                last_cycle_err_u2 = math.sqrt(sum(self.err_u2[N0:N1]) * dt)
+                last_cycle_div2 = sum(self.div_u2[N0:N1]) * dt
+                last_cycle_err_min2 = math.sqrt(min(self.err_u2[N0:N1]))
+                last_cycle_err_max2 = math.sqrt(max(self.err_u2[N0:N1]))
 
             self.err_u = [math.sqrt(i) for i in self.err_u]
             self.err_u2 = [math.sqrt(i) for i in self.err_u2]
 
-            # report of error norm for individual time steps
-            with open(self.str_dir_name + "/report_err.csv", 'w') as reportFile:
-                report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-                report_writer.writerow(["name"] + ["time"] + self.time_list)
-                report_writer.writerow([str_name] + ["corrected"] + self.err_u)
-                if self.testErrControl:
-                    report_writer.writerow([str_name] + ["corrected_errornorm"] + self.err_ut)
-                if self.hasTentativeVel:
-                    report_writer.writerow([str_name] + ["tentative"] + self.err_u2)
-                    if self.testErrControl:
-                        report_writer.writerow([str_name] + ["tentative_errornorm"] + self.err_u2t)
-
-        # report of norm of div and pressure gradients for individual time steps
+        # report error norm, norm of div, and pressure gradients for individual time steps
         with open(self.str_dir_name + "/report_time_lines.csv", 'w') as reportFile:
             report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-            report_writer.writerow([str_name] + ["corrected"] + self.div_u)
+            report_writer.writerow(["name"] + ["time"] + self.time_list)
+            if self.doErrControl:
+                report_writer.writerow([str_name] + ["corrected_error"] + self.err_u)
+                if self.testErrControl:
+                    report_writer.writerow([str_name] + ["test_corrected_errornorm"] + self.err_ut)
+                if self.hasTentativeVel:
+                    report_writer.writerow([str_name] + ["tentative_error"] + self.err_u2)
+                    if self.testErrControl:
+                        report_writer.writerow([str_name] + ["test_tentative_errornorm"] + self.err_u2t)
+
+            report_writer.writerow([str_name] + ["divergence_corrected"] + self.div_u)
             if self.hasTentativeVel:
-                report_writer.writerow([str_name] + ["tentative"] + self.div_u2)
+                report_writer.writerow([str_name] + ["divergence_tentative"] + self.div_u2)
             report_writer.writerow([str_name] + ["analytic_pressure_gradient"] + self.p_diff_analytic)
             report_writer.writerow([str_name] + ["computed_pressure_gradient"] + self.p_diff)
             report_writer.writerow([str_name] + ["pressure_gradient_error"] + self.p_diff_err)
+
+        # report error norm, norm of div, and pressure gradients averaged over seconds
+        with open(self.str_dir_name + "/report_seconds.csv", 'w') as reportFile:
+            report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
+            report_writer.writerow(["name"] + ["time"] + self.second_list)
+            if self.doErrControl:
+                report_writer.writerow([str_name] + ["corrected_error"] + self.second_err_u)
+                if self.hasTentativeVel:
+                    report_writer.writerow([str_name] + ["tentative_error"] + self.second_err_u2)
+
+            report_writer.writerow([str_name] + ["divergence_corrected"] + self.second_err_div)
+            if self.hasTentativeVel:
+                report_writer.writerow([str_name] + ["divergence_tentative"] + self.second_err_div2)
+            report_writer.writerow([str_name] + ["pressure_gradient_error"] + self.second_err_pg)
 
         # report without header
         with open(self.str_dir_name + "/report.csv", 'w') as reportFile:

@@ -205,7 +205,7 @@ outflow_point = Point(0.0, 0.0, 10.0)
 
 rm.initialize_output(V, mesh, "%sresults_%s_%s_%s_factor%4.2f_%ds_%dms" % (str_name, str_type, str_method, meshName,
                                                                            factor, ttime, dt * 1000))
-rm.initialize_error_control(factor, PS, V, meshName)
+rm.initialize_error_control(factor, PS, V, meshName, dt)
 
 # Explicit Chorin method================================================================================================
 if str_method == "chorinExpl":
@@ -284,9 +284,9 @@ if str_method == "chorinExpl":
     # Time-stepping
     info("Running of explicit Chorin method")
     t = dt
-    while t < (ttime + DOLFIN_EPS):
+    while t < (ttime + dt/2.0):
         print("t = ", t)
-        do_EC = rm.do_compute_error(t)
+        rm.update_time(t)
 
         # Update boundary condition
         v_in.t = t
@@ -300,8 +300,7 @@ if str_method == "chorinExpl":
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
-        if do_EC:
-            rm.compute_err(True, u1, t)
+        rm.compute_err(True, u1, t)
         rm.compute_div(True, u1)
         if rm.doSave:
             rm.save_vel(True, u1, t)
@@ -321,6 +320,10 @@ if str_method == "chorinExpl":
             rm.pFile << p1
         end()
 
+        # Report pressure gradient
+        p_diff = (p1(outflow_point) - p1(inflow_point))/20.0  # 20.0 is a length of a pipe
+        rm.save_p_diff(p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+
         # Velocity correction
         begin("Computing velocity correction")
         b3 = assemble(L3)
@@ -330,8 +333,7 @@ if str_method == "chorinExpl":
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
-        if do_EC:
-            rm.compute_err(False, u1, t)
+        rm.compute_err(False, u1, t)
         rm.compute_div(False, u1)
         if rm.doSave:
             rm.save_vel(False, u1, t)
@@ -436,9 +438,9 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
     # Time-stepping
     info("Running of Incremental pressure correction scheme n. 0")
     t = dt
-    while t < (ttime + DOLFIN_EPS):
+    while t < (ttime + dt/2.0):
         print("t = ", t)
-        do_EC = rm.do_compute_error(t)
+        rm.update_time(t)
 
         # Update boundary condition
         v_in.t = t
@@ -452,8 +454,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
-        if do_EC:
-            rm.compute_err(True, u1, t)
+        rm.compute_err(True, u1, t)
         rm.compute_div(True, u1)
         if rm.doSave:
             rm.save_vel(True, u1, t)
@@ -474,6 +475,11 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
             rm.pFile << p1
         end()
 
+        # Report pressure gradient
+        p_diff = (p1(outflow_point) - p1(inflow_point))/20.0  # 20.0 is a length of a pipe
+        rm.save_p_diff(p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+
+
         b = assemble(L2)
         [bc.apply(A2, b) for bc in bcu]
         try:
@@ -481,8 +487,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
-        if do_EC:
-            rm.compute_err(False, u1, t)
+        rm.compute_err(False, u1, t)
         rm.compute_div(False, u1)
         if rm.doSave:
             rm.save_vel(False, u1, t)
@@ -596,9 +601,9 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
     # Time-stepping
     info("Running of Incremental pressure correction scheme n. 1")
     t = dt
-    while t < (ttime + DOLFIN_EPS):
+    while t < (ttime + dt/2.0):
         print("t = ", t)
-        do_EC = rm.do_compute_error(t)
+        rm.update_time(t)
 
         # Update boundary condition
         v_in.t = t
@@ -617,8 +622,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
-        if do_EC:
-            rm.compute_err(True, u_, t)
+        rm.compute_err(True, u_, t)
         rm.compute_div(True, u_)
         if rm.doSave:
             rm.save_vel(True, u_, t)
@@ -650,8 +654,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
-        if do_EC:
-            rm.compute_err(False, u_, t)
+        rm.compute_err(False, u_, t)
         rm.compute_div(False, u_)
         if rm.doSave:
             rm.save_vel(False, u_, t)
@@ -726,9 +729,9 @@ if str_method == "direct":
     # Time-stepping
     info("Running of direct method")
     t = dt
-    while t < (ttime + DOLFIN_EPS):
+    while t < (ttime + dt/2.0):
         print("t = ", t)
-        do_EC = rm.do_compute_error(t)
+        rm.update_time(t)
 
         v_in.t = t
 
@@ -751,9 +754,13 @@ if str_method == "direct":
             rm.save_vel(False, velSp, t)
             rm.save_div(False, u)
             rm.pFile << p
+
+        # Report pressure gradient
+        p_diff = (p(outflow_point) - p(inflow_point))/20.0  # 20.0 is a length of a pipe
+        rm.save_p_diff(p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+
         rm.compute_div(False, u)
-        if do_EC:
-            rm.compute_err(False, u, t)
+        rm.compute_err(False, u, t)
 
         # Move to next time step
         assign(u0, u)
