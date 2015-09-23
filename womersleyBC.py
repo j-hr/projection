@@ -47,5 +47,9 @@ class WomersleyProfile(Expression):
     def value_shape(self):
         return (3,)
 
+p = -re(641.967 + (15.0987 - 296.542*I)*exp(8*I*pi*tm) + (87.7004 - 497.173*I)*exp(6*I*pi*tm) + (343.229 - 649.393*I)*exp(4*I*pi*tm) + (598.425 - 208.347*I)*exp(2*I*pi*tm) + (598.425 + 208.347*I)*exp(-2*I*pi*tm) + (343.229 + 649.393*I)*exp(-4*I*pi*tm) + (87.7004 + 497.173*I)*exp(-6*I*pi*tm) + (15.0987 + 296.542*I)*exp(-8*I*pi*tm))
+p_lambda = lambdify([tm], p)
 
 
+def analytic_pressure_grad(factor, t):
+    return factor * p_lambda(t)
