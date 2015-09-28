@@ -100,7 +100,7 @@ if str_method == 'ipcs0p' or str_method == 'ipcs1p':
 #   direct
 #   precision (criterion 10*E-?): use integers from 4 to 12 TODO test it
 str_solver = sys.argv[9]
-useDirect = True
+useDirectSolvers = True
 precision = 0
 if str_method == 'direct':
     if str_solver != 'default':
@@ -108,13 +108,13 @@ if str_method == 'direct':
 else:
     if str_solver == 'default':
         precision = 4
-        useDirect = False
+        useDirectSolvers = False
         print('Chosen Krylov solvers.')
     elif str_solver == 'direct':
         print('Chosen direct solvers.')
     else:
         precision = int(str_solver)
-        useDirect = False
+        useDirectSolvers = False
         print('Chosen Krylov solvers.')
 
 str_solver += ' ' + str(precision)
@@ -264,15 +264,15 @@ if str_method == "chorinExpl":
 
     # Create solvers; solver02 for tentative and finalize
     #                 solver1 for projection
-    if useDirect:
-        solver02 = LUSolver('mumps')
-        solver1 = LUSolver('mumps')
+    if useDirectSolvers:
+        solver_vel = LUSolver('mumps')
+        solver_p = LUSolver('mumps')
     else:
-        solver02 = KrylovSolver('gmres', 'default')   # nonsymetric > gmres
-        solver1 = KrylovSolver('cg', prec)          # symmetric > CG
+        solver_vel = KrylovSolver('gmres', 'default')   # nonsymetric > gmres
+        solver_p = KrylovSolver('cg', prec)          # symmetric > CG
         options = {'absolute_tolerance': 10**(-precision), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True}
         # apply global options for Krylov solvers
-        for solver in [solver02, solver1]:
+        for solver in [solver_vel, solver_p]:
             for key, value in options.items():
                 try:
                     solver.parameters[key] = value
@@ -296,7 +296,7 @@ if str_method == "chorinExpl":
         b1 = assemble(L1)
         [bc.apply(A1, b1) for bc in bcu]  # PYTHON syntax
         try:
-            solver02.solve(A1, u1.vector(), b1)
+            solver_vel.solve(A1, u1.vector(), b1)
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
@@ -312,7 +312,7 @@ if str_method == "chorinExpl":
         b2 = assemble(L2)
         [bc.apply(A2, b2) for bc in bcp]
         try:
-            solver1.solve(A2, p1.vector(), b2)
+            solver_p.solve(A2, p1.vector(), b2)
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
@@ -407,12 +407,12 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
 
     # Create solvers; solver02 for tentative and finalize
     #                 solver1 for projection
-    if useDirect:
-        solver02 = LUSolver('mumps')
-        solver1 = LUSolver('mumps')
+    if useDirectSolvers:
+        solver_vel = LUSolver('mumps')
+        solver_p = LUSolver('mumps')
     else:
-        solver02 = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
-        solver1 = KrylovSolver('cg', 'hypre_amg')          # symmetric > CG
+        solver_vel = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
+        solver_p = KrylovSolver('cg', 'hypre_amg')          # symmetric > CG
         options = {'absolute_tolerance': 10**(-precision), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True}
 
     # Get the nullspace if there are no pressure boundary conditions
@@ -422,11 +422,11 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         Q.dofmap().set(null_vec, 1.0)
         null_vec *= 1.0/null_vec.norm('l2')
         null_space = VectorSpaceBasis([null_vec])
-        solver1.set_nullspace(null_space)
+        solver_p.set_nullspace(null_space)
 
     # apply global options for Krylov solvers
-    if not useDirect:
-        for solver in [solver02, solver1]:
+    if not useDirectSolvers:
+        for solver in [solver_vel, solver_p]:
             for key, value in options.items():
                 try:
                     solver.parameters[key] = value
@@ -450,7 +450,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         b = assemble(L0)
         [bc.apply(A0, b) for bc in bcu]
         try:
-            solver02.solve(A0, u1.vector(), b)
+            solver_vel.solve(A0, u1.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
@@ -467,7 +467,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         if not bcp:
             null_space.orthogonalize(b)
         try:
-            solver1.solve(A1, p1.vector(), b)
+            solver_p.solve(A1, p1.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
@@ -483,7 +483,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         b = assemble(L2)
         [bc.apply(A2, b) for bc in bcu]
         try:
-            solver02.solve(A2, u1.vector(), b)
+            solver_vel.solve(A2, u1.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
@@ -567,16 +567,17 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
     A1 = assemble(a1)
     A2 = assemble(a2)
 
-    # Create solvers; solver02 for tentative and finalize
-    #                 solver1 for projection
-    if useDirect:
-        solver02 = LUSolver('mumps')
-        solver1 = LUSolver('mumps')
+    # Create solvers; solver_vel for tentative and finalize
+    #                 solver_p for projection
+    if useDirectSolvers:
+        solver_vel = LUSolver('mumps')
+        solver_p = LUSolver('mumps')
     else:
-        solver02 = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
-        solver1 = KrylovSolver('cg', 'hypre_amg')          # NT this, with disabled setnullspace gives same oscilations
+        solver_vel = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
+        solver_p = KrylovSolver('cg', 'hypre_amg')          # NT this, with disabled setnullspace gives same oscilations
         # solver1 = KrylovSolver('gmres', 'hypre_amg')          # symmetric > CG
-        options = {'absolute_tolerance': 10**(-precision), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True}
+        options = {'absolute_tolerance': 10**(-20), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True,
+                   'maximum_iterations': 500}
 
     # Get the nullspace if there are no pressure boundary conditions
     foo = Function(Q)     # auxiliary vector for setting pressure nullspace
@@ -585,11 +586,11 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         Q.dofmap().set(null_vec, 1.0)
         null_vec *= 1.0/null_vec.norm('l2')
         null_space = VectorSpaceBasis([null_vec])
-        solver1.set_nullspace(null_space)  # IMP deprecated for KrylovSolver, not working for direct solver
+        solver_p.set_nullspace(null_space)  # IMP deprecated for KrylovSolver, not working for direct solver
 
     # apply global options for Krylov solvers
-    if not useDirect:
-        for solver in [solver02, solver1]:
+    if not useDirectSolvers:
+        for solver in [solver_vel, solver_p]:
             for key, value in options.items():
                 try:
                     solver.parameters[key] = value
@@ -618,7 +619,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         b = assemble(L0)
         [bc.apply(A0, b) for bc in bcu]
         try:
-            solver02.solve(A0, u_.vector(), b)
+            solver_vel.solve(A0, u_.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
@@ -635,7 +636,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         if not bcp:
             null_space.orthogonalize(b)
         try:
-            solver1.solve(A1, p_.vector(), b)
+            solver_p.solve(A1, p_.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
@@ -650,7 +651,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         b = assemble(L2)
         [bc.apply(A2, b) for bc in bcu]
         try:
-            solver02.solve(A2, u_.vector(), b)
+            solver_vel.solve(A2, u_.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()

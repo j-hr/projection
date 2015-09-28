@@ -124,7 +124,7 @@ class ResultsManager:
     def update_time(self, actual_time):
         actual_time = round(actual_time, 3)
         self.time_list.append(actual_time)  # round time step to 0.001
-        if actual_time > 0.5 and int(actual_time * 1000) % 1000 == 0:
+        if actual_time > 0.5 and int(round(actual_time * 1000)) % 1000 == 0:
             self.isWholeSecond = True
             self.second_list.append(actual_time)
         else:
@@ -145,7 +145,7 @@ class ResultsManager:
         if self.isWholeSecond:
             N1 = len(self.p_diff_err)
             N0 = N1 - self.stepsInSecond
-            self.second_err_pg.append(sum(self.p_diff_err[N0:N1]))
+            self.second_err_pg.append(sum(self.p_diff_err[N0:N1])) / self.stepsInSecond
 
     # method for saving velocity (ensuring, that it will be one time line in ParaView)
     def save_vel(self, is_tent, field, t):
@@ -176,7 +176,7 @@ class ResultsManager:
             sec_div_list = self.second_err_div2 if isTent else self.second_err_div
             N1 = len(div_list)
             N0 = N1 - self.stepsInSecond
-            sec_div_list.append(sum(div_list[N0:N1]))
+            sec_div_list.append(sum(div_list[N0:N1])) / self.stepsInSecond
 
         print("Computed norm of divergence. Time: %f" % (toc() - tmp))
 
@@ -278,7 +278,7 @@ class ResultsManager:
                 sec_err_list = self.second_err_u2 if is_tent else self.second_err_u
                 N1 = len(er_list)
                 N0 = N1 - self.stepsInSecond
-                sec_err_list.append(math.sqrt(sum(er_list[N0:N1])))
+                sec_err_list.append(math.sqrt(sum(er_list[N0:N1]) / self.stepsInSecond))
             terc = toc() - tmp
             self.time_erc += terc
             print("Computed errornorm. Time: %f, Total: %f" % (terc, self.time_erc))
