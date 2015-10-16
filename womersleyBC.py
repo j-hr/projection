@@ -5,8 +5,6 @@ from dolfin import Expression, near, pi
 from sympy import I, re, sqrt, exp, symbols, lambdify, besselj
 from scipy.special import jv
 
-factor = 0.0
-
 R = 5.0
 r, tm = symbols('r tm')
 u = (-43.2592 * r ** 2 +
@@ -31,6 +29,10 @@ u = (-43.2592 * r ** 2 +
 u_lambda = lambdify([r, tm], u, ['numpy', {'besselj': jv}])
 
 
+def average_analytic_velocity(factor):
+    return 1081.48 * factor
+
+
 class WomersleyProfile(Expression):
     def __init__(self, factor):
         self.t = 0
@@ -49,6 +51,10 @@ class WomersleyProfile(Expression):
 
 p = -re(641.967 + (15.0987 - 296.542*I)*exp(8*I*pi*tm) + (87.7004 - 497.173*I)*exp(6*I*pi*tm) + (343.229 - 649.393*I)*exp(4*I*pi*tm) + (598.425 - 208.347*I)*exp(2*I*pi*tm) + (598.425 + 208.347*I)*exp(-2*I*pi*tm) + (343.229 + 649.393*I)*exp(-4*I*pi*tm) + (87.7004 + 497.173*I)*exp(-6*I*pi*tm) + (15.0987 + 296.542*I)*exp(-8*I*pi*tm))
 p_lambda = lambdify([tm], p)
+
+
+def average_analytic_pressure_grad(factor):
+    return 641.967 * factor
 
 
 def analytic_pressure_grad(factor, t):

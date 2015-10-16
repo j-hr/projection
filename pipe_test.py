@@ -1,6 +1,7 @@
 from __future__ import print_function
 from dolfin import *
 import sys
+import argparse
 
 import womersleyBC
 import results
@@ -52,6 +53,10 @@ PETScOptions.set('mat_mumps_icntl_4', 0)  # 1-3 gives lots of information for mu
 
 
 # Resolve input arguments===============================================================================================
+parser = argparse.ArgumentParser()
+parser.add_argument('-m', '--method', help='Input file name', options=['steady', 'pulse0', 'pulsePrec'], required=True)
+args = parser.parse_args()
+
 print(sys.argv)
 nargs = 10
 arguments = "method type mesh_name T dt(minimal: 0.001) factor \
@@ -134,6 +139,8 @@ meshName = sys.argv[3]
 mesh = Mesh("meshes/" + meshName + ".xml")
 cell_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_physical_region.xml")
 facet_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_facet_region.xml")
+dsIn = Measure("ds", subdomain_id=2, subdomain_data=facet_function)
+dsOut = Measure("ds", subdomain_id=3, subdomain_data=facet_function)
 print("Mesh name: ", meshName, "    ", mesh)
 print("Mesh norm max: ", mesh.hmax())
 print("Mesh norm min: ", mesh.hmin())
@@ -146,6 +153,9 @@ PS = FunctionSpace(mesh, "Lagrange", 2)  # partial solution (must be same order 
 # fixed parameters (used in analytic solution and in BC)
 nu = 3.71  # kinematic viscosity
 R = 5.0  # cylinder radius
+
+# in/outflow area
+area = assemble(interpolate(Expression("1.0"), Q) * dsIn)
 
 # Boundary Conditions===================================================================================================
 # boundary parts: 1 walls, 2 inflow, 3 outflow
@@ -200,11 +210,10 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     # exit()
 
 # Output and error control =============================================================================================
-inflow_point = Point(0.0, 0.0, -10.0)
-outflow_point = Point(0.0, 0.0, 10.0)
 
-rm.initialize_output(V, mesh, "%sresults_%s_%s_%s_factor%4.2f_%ds_%dms" % (str_name, str_type, str_method, meshName,
-                                                                           factor, ttime, dt * 1000))
+rm.initialize_output(V, mesh, "%sresults_%s_%s_%s_factor%4.2f_%ds_%dms" %
+                     (str_name, str_type, str_method, meshName, factor, ttime, dt * 1000),
+                     womersleyBC.average_analytic_pressure_grad(factor), womersleyBC.average_analytic_velocity(factor))
 rm.initialize_error_control(factor, PS, V, meshName, dt)
 
 # Explicit Chorin method================================================================================================
@@ -316,13 +325,12 @@ if str_method == "chorinExpl":
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
-        if rm.doSave:
-            rm.pFile << p1
-        end()
-
         # Report pressure gradient
-        p_diff = (p1(outflow_point) - p1(inflow_point))/20.0  # 20.0 is a length of a pipe
-        rm.save_p_diff(p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+        p_in = assemble((1.0/area) * p1 * dsIn)
+        p_out = assemble((1.0/area) * p1 * dsOut)
+        p_diff = (p_out - p_in)/20.0  # 20.0 is a length of a pipe
+        rm.save_pressure(p1, p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+        end()
 
         # Velocity correction
         begin("Computing velocity correction")
@@ -471,14 +479,12 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
-        if rm.doSave:
-            rm.pFile << p1
-        end()
-
         # Report pressure gradient
-        p_diff = (p1(outflow_point) - p1(inflow_point))/20.0  # 20.0 is a length of a pipe
-        rm.save_p_diff(p_diff, womersleyBC.analytic_pressure_grad(factor, t))
-
+        p_in = assemble((1.0/area) * p1 * dsIn)
+        p_out = assemble((1.0/area) * p1 * dsOut)
+        p_diff = (p_out - p_in)/20.0  # 20.0 is a length of a pipe
+        rm.save_pressure(p1, p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+        end()
 
         b = assemble(L2)
         [bc.apply(A2, b) for bc in bcu]
@@ -511,7 +517,9 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
     # Boundary conditions
     bc0 = DirichletBC(V, noSlip, facet_function, 1)
     inflow = DirichletBC(V, v_in, facet_function, 2)
-    outflow = DirichletBC(Q, 0.0, facet_function, 3)  # we can choose, whether to use it, or use projection to nullspace
+    # we can choose, whether to use pressure BC, or use projection to nullspace
+    # outflow = DirichletBC(Q, Constant(0.0), facet_function, 3)
+    outflow = DirichletBC(Q, Constant(0.0), "near(x[0],0.0) && near(x[1],0.0) && near(x[2],10.0)", method="pointwise")
     bcu = [inflow, bc0]
     bcp = []
     if pressure_BC:
@@ -574,9 +582,9 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         solver_p = LUSolver('mumps')
     else:
         solver_vel = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
-        solver_p = KrylovSolver('cg', 'hypre_amg')          # NT this, with disabled setnullspace gives same oscilations
-        # solver1 = KrylovSolver('gmres', 'hypre_amg')          # symmetric > CG
-        options = {'absolute_tolerance': 10**(-20), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True,
+        solver_p = KrylovSolver('cg', 'hypre_amg')          # symmetric > CG TODO zkusit 'ilu' predpodminovac
+        # solver_p = KrylovSolver('gmres', 'hypre_amg')     # NT this, with disabled setnullspace gives same oscilations
+        options = {'absolute_tolerance': 10**(-precision), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True,
                    'maximum_iterations': 500}
 
     # Get the nullspace if there are no pressure boundary conditions
@@ -586,7 +594,8 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         Q.dofmap().set(null_vec, 1.0)
         null_vec *= 1.0/null_vec.norm('l2')
         null_space = VectorSpaceBasis([null_vec])
-        solver_p.set_nullspace(null_space)  # IMP deprecated for KrylovSolver, not working for direct solver
+        as_backend_type(A0).set_nullspace(null_space)
+        # solver_p.set_nullspace(null_space)  # IMP deprecated for KrylovSolver, not working for direct solver
 
     # apply global options for Krylov solvers
     if not useDirectSolvers:
@@ -640,13 +649,13 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         except RuntimeError as inst:
             rm.report_fail(str_name, dt, t)
             exit()
-        if rm.doSave:
-            rm.pFile << p_
-        end()
-
         # Report pressure gradient
-        p_diff = (p_(outflow_point) - p_(inflow_point))/20.0  # 20.0 is a length of a pipe
-        rm.save_p_diff(p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+        p_in = assemble((1.0/area) * p_ * dsIn)
+        p_out = assemble((1.0/area) * p_ * dsOut)
+        # print(p_in, p_(0.0, 0.0, -10), p_(0.0, 5.0, -10.0), p_(5.0, 0.0, -10.0))
+        p_diff = (p_out - p_in)/20.0  # 20.0 is a length of a pipe
+        rm.save_pressure(p_, p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+        end()
 
         b = assemble(L2)
         [bc.apply(A2, b) for bc in bcu]
@@ -754,12 +763,11 @@ if str_method == "direct":
         if rm.doSave:
             rm.save_vel(False, velSp, t)
             rm.save_div(False, u)
-            rm.pFile << p
-
         # Report pressure gradient
-        p_diff = (p(outflow_point) - p(inflow_point))/20.0  # 20.0 is a length of a pipe
-        rm.save_p_diff(p_diff, womersleyBC.analytic_pressure_grad(factor, t))
-
+        p_in = assemble((1.0/area) * p * dsIn)
+        p_out = assemble((1.0/area) * p * dsOut)
+        p_diff = (p_out - p_in)/20.0  # 20.0 is a length of a pipe
+        rm.save_pressure(p, p_diff, womersleyBC.analytic_pressure_grad(factor, t))
         rm.compute_div(False, u)
         rm.compute_err(False, u, t)
 

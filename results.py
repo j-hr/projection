@@ -21,6 +21,7 @@ class ResultsManager:
         self.hasTentativeVel = False
         self.isSteadyFlow = None
 
+        self.velocity_norm = None
         self.solutionSpace = None
         self.factor = None
         self.solution = None
@@ -46,6 +47,8 @@ class ResultsManager:
         self.p_diff = []
         self.p_diff_analytic = []
         self.p_diff_err = []
+        self.p_diff_err_abs = []
+        self.pressure_gradient_norm = None
 
         self.uFile = None
         self.uDiffFile = None
@@ -54,9 +57,13 @@ class ResultsManager:
         self.dFile = None
         self.d2File = None
         self.pFile = None
+        self.pgFile = None
+        self.pgDiffFile = None
         self.vel = None
         self.D = None
         self.divFunction = None
+        self.PGSpace = None
+        self.pgFunction = None
 
     def set_save_mode(self, option):
         if option == 'save' or option == 'diff':
@@ -96,10 +103,14 @@ class ResultsManager:
         if self.doSaveDiff:
             self.uDiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/vel_sol_diff.xdmf")
             self.uDiffFile.parameters['rewrite_function_mesh'] = False
+            self.pgDiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_grad_diff.xdmf")
+            self.pgDiffFile.parameters['rewrite_function_mesh'] = False
         self.dFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/divergence.xdmf")  # maybe just compute norm
         self.dFile.parameters['rewrite_function_mesh'] = False
         self.pFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure.xdmf")
         self.pFile.parameters['rewrite_function_mesh'] = False
+        self.pgFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_grad.xdmf")
+        self.pgFile.parameters['rewrite_function_mesh'] = False
         if self.hasTentativeVel:
             self.u2File = XDMFFile(mpi_comm_world(), self.str_dir_name + "/velocity_tent.xdmf")
             self.u2File.parameters['rewrite_function_mesh'] = False
@@ -109,7 +120,7 @@ class ResultsManager:
             self.d2File = XDMFFile(mpi_comm_world(), self.str_dir_name + "/div_tent.xdmf")  # maybe just compute norm
             self.d2File.parameters['rewrite_function_mesh'] = False
 
-    def initialize_output(self, velocity_space, mesh, dir_name):
+    def initialize_output(self, velocity_space, mesh, dir_name, pressure_gradient_norm, velocity_norm):
         print('Initializing output')
         self.str_dir_name = dir_name
         # create directory, needed because of using "with open(..." construction later
@@ -119,7 +130,11 @@ class ResultsManager:
             self.vel = Function(velocity_space)
             self.D = FunctionSpace(mesh, "Lagrange", 1)
             self.divFunction = Function(self.D)
+            self.PGSpace = VectorFunctionSpace(mesh, "DG", 0)
+            self.pgFunction = Function(self.PGSpace)
             self.initialize_xdmf_files()
+        self.pressure_gradient_norm = pressure_gradient_norm
+        self.velocity_norm = velocity_norm
 
     def update_time(self, actual_time):
         actual_time = round(actual_time, 3)
@@ -138,15 +153,6 @@ class ResultsManager:
         div_file << self.divFunction
         print("Computed and saved divergence. Time: %f" % (toc() - tmp))
 
-    def save_p_diff(self, computed_gradient, analytic_gradient):
-        self.p_diff.append(computed_gradient)
-        self.p_diff_analytic.append(analytic_gradient)
-        self.p_diff_err.append(abs(computed_gradient-analytic_gradient))
-        if self.isWholeSecond:
-            N1 = len(self.p_diff_err)
-            N0 = N1 - self.stepsInSecond
-            self.second_err_pg.append(sum(self.p_diff_err[N0:N1])) / self.stepsInSecond
-
     # method for saving velocity (ensuring, that it will be one time line in ParaView)
     def save_vel(self, is_tent, field, t):
         vel_file = self.u2File if is_tent else self.uFile
@@ -156,9 +162,34 @@ class ResultsManager:
         if self.doSaveDiff:
             vel_file = self.u2DiffFile if is_tent else self.uDiffFile
             sol = self.assemble_solution(t)
-            self.vel.assign(field - sol)
+            self.vel.assign((1.0 / self.velocity_norm) * (field - sol))
             vel_file << self.vel
         print("Saved solution. Time: %f" % (toc() - tmp))
+
+    # method for saving velocity (ensuring, that it will be one time line in ParaView)
+    def save_pressure(self, pressure, computed_gradient, analytic_gradient):
+        if self.doSave:
+            self.pFile << pressure
+            pg = project((1.0 / self.pressure_gradient_norm) * grad(pressure), self.PGSpace)
+            self.pgFunction.assign(pg)
+            self.pgFile << self.pgFunction
+            if self.doSaveDiff:
+                sol_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pressure_gradient_norm)
+                sol = interpolate(sol_expr, self.PGSpace)
+                # plot(sol)
+                # plot(pg)
+                # plot(pg - sol, interactive=True)
+                # exit()
+                self.pgFunction.assign(pg-sol)
+                self.pgDiffFile << self.pgFunction
+        self.p_diff.append(computed_gradient)
+        self.p_diff_analytic.append(analytic_gradient)
+        self.p_diff_err.append(computed_gradient-analytic_gradient)
+        self.p_diff_err_abs.append(abs(computed_gradient-analytic_gradient))
+        if self.isWholeSecond:
+            N1 = len(self.p_diff_err)
+            N0 = N1 - self.stepsInSecond
+            self.second_err_pg.append(sum(self.p_diff_err_abs[N0:N1]) / self.stepsInSecond)
 
     def report_fail(self, str_name, dt, t):
         print("Runtime error:", sys.exc_info()[1])
@@ -176,7 +207,7 @@ class ResultsManager:
             sec_div_list = self.second_err_div2 if isTent else self.second_err_div
             N1 = len(div_list)
             N0 = N1 - self.stepsInSecond
-            sec_div_list.append(sum(div_list[N0:N1])) / self.stepsInSecond
+            sec_div_list.append(sum(div_list[N0:N1]) / self.stepsInSecond)
 
         print("Computed norm of divergence. Time: %f" % (toc() - tmp))
 
@@ -184,7 +215,8 @@ class ResultsManager:
     def initialize_error_control(self, factor, PS, V, mesh_name, dt):
         self.solutionSpace = V
         self.factor = float(factor)
-        self.stepsInSecond = int(round(1.0 / dt))
+        self.stepsInSecond = int(round(1.0 / float(dt)))
+        print("results: stepsInSecond = ", self.stepsInSecond)
         if self.doErrControl:
             if not self.isSteadyFlow:
                 self.load_precomputed_bessel_functions(mesh_name, PS)
@@ -314,8 +346,8 @@ class ResultsManager:
             avg_err_u = total_err_u / math.sqrt(len(self.time_list))
             avg_err_u2 = total_err_u2 / math.sqrt(len(self.time_list))
 
-            # last_cycle = time_list[N0:N1]
-            # print("N: ",N," len: ",len(last_cycle), " list: ",last_cycle)
+            last_cycle = self.time_list[N0:N1]
+            # print("N0,N1: ",N0, N1 ," len: ",len(last_cycle), " list: ",last_cycle)
             last_cycle_err_u = math.sqrt(sum(self.err_u[N0:N1]) * dt)
             last_cycle_div = sum(self.div_u[N0:N1]) * dt
             last_cycle_err_min = math.sqrt(min(self.err_u[N0:N1]))
@@ -332,22 +364,43 @@ class ResultsManager:
         # report error norm, norm of div, and pressure gradients for individual time steps
         with open(self.str_dir_name + "/report_time_lines.csv", 'w') as reportFile:
             report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-            report_writer.writerow(["name"] + ["time"] + self.time_list)
+            report_writer.writerow(["name"] + ["what"] + ["time"] + self.time_list)
             if self.doErrControl:
-                report_writer.writerow([str_name] + ["corrected_error"] + self.err_u)
+                report_writer.writerow([str_name] + ["corrected_error"] + [str_name + "_CE"] + self.err_u)
+                self.err_u = [i/self.factor for i in self.err_u]
+                report_writer.writerow([str_name] + ["corrected_error_scaled"] + [str_name + "_CEs"] + self.err_u)
                 if self.testErrControl:
-                    report_writer.writerow([str_name] + ["test_corrected_errornorm"] + self.err_ut)
+                    report_writer.writerow([str_name] + ["test_corrected_errornorm"] + [str_name + "_TCE"] + self.err_ut)
                 if self.hasTentativeVel:
-                    report_writer.writerow([str_name] + ["tentative_error"] + self.err_u2)
+                    report_writer.writerow([str_name] + ["tentative_error"] + [str_name + "_TE"] + self.err_u2)
+                    self.err_u2 = [i/self.factor for i in self.err_u2]
+                    report_writer.writerow([str_name] + ["tentative_error_scaled"] + [str_name + "_TEs"] + self.err_u2)
                     if self.testErrControl:
-                        report_writer.writerow([str_name] + ["test_tentative_errornorm"] + self.err_u2t)
+                        report_writer.writerow([str_name] + ["test_tentative_errornorm"] + [str_name + "_TTE"] + self.err_u2t)
 
-            report_writer.writerow([str_name] + ["divergence_corrected"] + self.div_u)
+            report_writer.writerow([str_name] + ["divergence_corrected"] + [str_name + "_DC"] + self.div_u)
             if self.hasTentativeVel:
-                report_writer.writerow([str_name] + ["divergence_tentative"] + self.div_u2)
-            report_writer.writerow([str_name] + ["analytic_pressure_gradient"] + self.p_diff_analytic)
-            report_writer.writerow([str_name] + ["computed_pressure_gradient"] + self.p_diff)
-            report_writer.writerow([str_name] + ["pressure_gradient_error"] + self.p_diff_err)
+                report_writer.writerow([str_name] + ["divergence_tentative"] + [str_name + "_DT"] + self.div_u2)
+            report_writer.writerow([str_name] + ["analytic_pressure_gradient"] + ["analytic"] + self.p_diff_analytic)
+            report_writer.writerow([str_name] + ["computed_pressure_gradient"] + [str_name + "_PG"] + self.p_diff)
+            report_writer.writerow([str_name] + ["pressure_gradient_error"] + [str_name + "_PGE"] + self.p_diff_err)
+            report_writer.writerow([str_name] + ["pressure_gradient_error_abs"] + [str_name + "_PGEA"] + self.p_diff_err_abs)
+            p_diff_analytic = [i/self.factor for i in self.p_diff_analytic]
+            p_diff = [i/self.factor for i in self.p_diff]
+            p_diff_err = [i/self.factor for i in self.p_diff_err]
+            p_diff_err_abs = [i/self.factor for i in self.p_diff_err_abs]
+            report_writer.writerow([str_name] + ["scaled_analytic_pressure_gradient"] + ["analytic_scaled"] + p_diff_analytic)
+            report_writer.writerow([str_name] + ["scaled_computed_pressure_gradient"] + [str_name + "_PGs"] + p_diff)
+            report_writer.writerow([str_name] + ["scaled_pressure_gradient_error"] + [str_name + "_PGEs"] + p_diff_err)
+            report_writer.writerow([str_name] + ["scaled_pressure_gradient_error_abs"] + [str_name + "_PGEAs"] + p_diff_err_abs)
+            self.p_diff_analytic = [i/self.pressure_gradient_norm for i in self.p_diff_analytic]
+            self.p_diff = [i/self.pressure_gradient_norm for i in self.p_diff]
+            self.p_diff_err = [i/self.pressure_gradient_norm for i in self.p_diff_err]
+            self.p_diff_err_abs = [i/self.pressure_gradient_norm for i in self.p_diff_err_abs]
+            report_writer.writerow([str_name] + ["normalized_analytic_pressure_gradient"] + ["analytic_normalized"] + self.p_diff_analytic)
+            report_writer.writerow([str_name] + ["normalized_computed_pressure_gradient"] + [str_name + "_PGn"] + self.p_diff)
+            report_writer.writerow([str_name] + ["normalized_pressure_gradient_error"] + [str_name + "_PGEn"] + self.p_diff_err)
+            report_writer.writerow([str_name] + ["normalized_pressure_gradient_error_abs"] + [str_name + "_PGEAn"] + self.p_diff_err_abs)
 
         # report error norm, norm of div, and pressure gradients averaged over seconds
         with open(self.str_dir_name + "/report_seconds.csv", 'w') as reportFile:
@@ -355,13 +408,19 @@ class ResultsManager:
             report_writer.writerow(["name"] + ["time"] + self.second_list)
             if self.doErrControl:
                 report_writer.writerow([str_name] + ["corrected_error"] + self.second_err_u)
+                self.second_err_u = [i/self.factor for i in self.second_err_u]
+                report_writer.writerow([str_name] + ["corrected_error_scaled"] + self.second_err_u)
                 if self.hasTentativeVel:
                     report_writer.writerow([str_name] + ["tentative_error"] + self.second_err_u2)
+                    self.second_err_u2 = [i/self.factor for i in self.second_err_u2]
+                    report_writer.writerow([str_name] + ["tentative_error_scaled"] + self.second_err_u2)
 
             report_writer.writerow([str_name] + ["divergence_corrected"] + self.second_err_div)
             if self.hasTentativeVel:
                 report_writer.writerow([str_name] + ["divergence_tentative"] + self.second_err_div2)
             report_writer.writerow([str_name] + ["pressure_gradient_error"] + self.second_err_pg)
+            self.second_err_pg = [i/self.factor for i in self.second_err_pg]
+            report_writer.writerow([str_name] + ["pressure_gradient_error_scaled"] + self.second_err_pg)
 
         # report without header
         with open(self.str_dir_name + "/report.csv", 'w') as reportFile:
