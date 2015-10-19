@@ -53,89 +53,68 @@ PETScOptions.set('mat_mumps_icntl_4', 0)  # 1-3 gives lots of information for mu
 
 
 # Resolve input arguments===============================================================================================
-parser = argparse.ArgumentParser()
-parser.add_argument('-m', '--method', help='Input file name', options=['steady', 'pulse0', 'pulsePrec'], required=True)
-args = parser.parse_args()
-
 print(sys.argv)
-nargs = 10
-arguments = "method type mesh_name T dt(minimal: 0.001) factor \
-error_control_start_time(-1 for default starting time, 0 for no errc.) save_results(save/noSave) solvers name"
-if len(sys.argv) != nargs + 1:
-    exit("Wrong number of arguments. Should be: %d (%s)" % (nargs, arguments))
-
-# name used for result folders and report files
-str_name = sys.argv[10]
-
-# choose type of flow:
+parser = argparse.ArgumentParser()
+parser.add_argument('method', help='Computing method', choices=['direct', 'chorinExpl', 'ipcs0', 'ipcs1'])
+parser.add_argument('type', help='Flow type', choices=['steady', 'pulse0', 'pulsePrec'])
 #   steady - parabolic profile (0.5 s onset)
 # Womersley profile (1 s period)
 #   pulse0 - u(0)=0
 #   pulsePrec - u(0) from precomputed solution (steady Stokes problem)
-str_type = sys.argv[2]
-print("Problem type: " + str_type)
-
-# save mode
-#   save: create .xdmf files with velocity, pressure, divergence
+parser.add_argument('mesh', help='Mesh name')
+parser.add_argument('time', help='Total time', type=int)
+parser.add_argument('dt', help='Time step', type=float)
+parser.add_argument('-F', '--factor', help='Velocity scale factor', type=float, default=1.0)
+parser.add_argument('-e', '--error', help='Error control mode', choices=['doEC', 'noEC'], default='doEC')
+parser.add_argument('-S', '--save', help='Save solution mode', choices=['doSave', 'noSave', 'diff'], default='noSave')
+#   doSave: create .xdmf files with velocity, pressure, divergence
 #   diff: save also difference vel-sol
 #   noSave: do not create .xdmf files with velocity, pressure, divergence
+parser.add_argument('-s', '--solvers', help='Solvers', choices=['direct', 'krylov'], default='krylov')
+parser.add_argument('--prec', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu'],
+                    default='hypre_amg')
+parser.add_argument('-p', '--precision', help='Krylov solver precision', type=int, default=5)
+parser.add_argument('-b', '--bc', help='Pressure boundary condition mode', choices=['outflow', 'nullspace', 'lagrange'],
+                    default='outflow')
+parser.add_argument('-n', '--name', default='test')
+
+args = parser.parse_args()
+print(args)
+print("Problem type: " + args.type)
 rm = results.ResultsManager()
-rm.set_save_mode(sys.argv[8])
-
-# error control mode
-#   0 no error control
-#   -1 default option (start measuring error at 0.5 for steady and 1.0 for unsteady flow)
-rm.set_error_control_mode(sys.argv[7], str_type)
-
-# choose a method: direct, chorinExpl, ipcs0, ipcs0p, ipcs1, ipcs1p
-str_method = sys.argv[1]
-print("Method:       " + str_method)
+rm.set_save_mode(args.save)
+rm.set_error_control_mode(args.error, args.type)
+print("Method:       " + args.method)
 hasTentativeVel = False
-if str_method == 'chorinExpl' or str_method == 'ipcs0' or str_method == 'ipcs0p' or str_method == 'ipcs1' or\
-        str_method == 'ipcs1p':
+if args.method in ['chorinExpl', 'ipcs0', 'ipcs1']:
     hasTentativeVel = True
     rm.hasTentativeVel = True
-
-pressure_BC = True
-if str_method == 'ipcs0p' or str_method == 'ipcs1p':
-    pressure_BC = False
-
-# choose which solvers to use in projection methods
-#   default
-#   direct
-#   precision (criterion 10*E-?): use integers from 4 to 12 TODO test it
-str_solver = sys.argv[9]
-useDirectSolvers = True
-precision = 0
-if str_method == 'direct':
-    if str_solver != 'default':
+if args.method == 'direct':
+    if args.solver != 'default':
         exit('Parameter solvers should be \'default\' when using direct method.')
 else:
-    if str_solver == 'default':
-        precision = 4
-        useDirectSolvers = False
+    if args.solvers == 'krylov':
         print('Chosen Krylov solvers.')
-    elif str_solver == 'direct':
+    elif args.solvers == 'direct':
         print('Chosen direct solvers.')
-    else:
-        precision = int(str_solver)
-        useDirectSolvers = False
-        print('Chosen Krylov solvers.')
 
-str_solver += ' ' + str(precision)
+str_solver = args.solvers + ' ' + str(args.precision)
 options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': True}
 
 # Set parameter values
-dt = float(sys.argv[5])
-ttime = float(sys.argv[4])
+dt = args.dt
+ttime = args.time
 print("Time:         %1.0f s\ndt:           %d ms" % (ttime, 1000 * dt))
-factor = float(sys.argv[6])  # default: 1.0
+factor = args.factor
 print("Velocity scale factor = %4.2f" % factor)
 reynolds = 728.761 * factor
 print("Computing with Re = %f" % reynolds)
 
-# Import gmsh mesh 
-meshName = sys.argv[3]
+if args.method == 'chorinExpl' and args.bc != 'outflow': exit('This combination is not coded properly.')
+
+# ======================================================================================================================
+# Import gmsh mesh
+meshName = args.mesh
 mesh = Mesh("meshes/" + meshName + ".xml")
 cell_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_physical_region.xml")
 facet_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_facet_region.xml")
@@ -157,23 +136,25 @@ R = 5.0  # cylinder radius
 # in/outflow area
 area = assemble(interpolate(Expression("1.0"), Q) * dsIn)
 
+volume = assemble(interpolate(Expression("1.0"), Q) * dx)
+
 # Boundary Conditions===================================================================================================
 # boundary parts: 1 walls, 2 inflow, 3 outflow
 noSlip = Constant((0.0, 0.0, 0.0))
-if str_type == "steady":
+if args.type == "steady":
     v_in = Expression(("0.0", "0.0",
                        "(t<0.5)?((sin(pi*t))*factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))):\
                        (factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1])))"),
                       t=0, factor=factor)
-elif str_type == "pulse0" or str_type == "pulsePrec":
+else:
     v_in = womersleyBC.WomersleyProfile(factor)
 
 # Initial Conditions====================================================================================================
-if str_type == "pulsePrec":  # computes initial velocity as a solution of steady Stokes problem with input velocity v_in
+if args.type == "pulsePrec":
+    # computes initial velocity as a solution of steady Stokes problem with input velocity v_in
     temp = toc()
     begin("Computing initial velocity")
     t = 0  # used in v_in
-
     # Define function spaces (Taylor-Hood)
     W = MixedFunctionSpace([V, Q])
     bc0 = DirichletBC(W.sub(0), noSlip, facet_function, 1)
@@ -199,7 +180,7 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
         # lhs(F) == rhs(F) means that is a linear problem
         solve(lhs(F) == rhs(F), w, bcu, solver_parameters={'linear_solver': 'mumps'})
     except RuntimeError as inst:
-        rm.report_fail(str_name, dt, t)
+        rm.report_fail(args.name, dt, t)
         exit()
     # Extract solutions:
     (u_prec, p_prec) = w.split()
@@ -210,14 +191,66 @@ if str_type == "pulsePrec":  # computes initial velocity as a solution of steady
     # exit()
 
 # Output and error control =============================================================================================
+rm.initialize(V, Q, mesh, "%sresults_%s_%s_%s_%s_factor%4.2f_%ds_%dms" %
+              (args.name, args.type, args.method, args.bc, meshName, factor, ttime, dt * 1000), factor, PS, V, meshName, dt)
 
-rm.initialize_output(V, mesh, "%sresults_%s_%s_%s_factor%4.2f_%ds_%dms" %
-                     (str_name, str_type, str_method, meshName, factor, ttime, dt * 1000),
-                     womersleyBC.average_analytic_pressure_grad(factor), womersleyBC.average_analytic_velocity(factor))
-rm.initialize_error_control(factor, PS, V, meshName, dt)
+
+def save_pressure(pressure):
+    # normalize pressure
+    p_average = assemble((1.0/volume) * pressure * dx)
+    p_average_function = interpolate(Expression("p", p=p_average), Q)
+    pressure.assign(pressure - p_average_function)
+    # Report pressure gradient
+    p_in = assemble((1.0/area) * pressure * dsIn)
+    p_out = assemble((1.0/area) * pressure * dsOut)
+    # print(p_in, p_(0.0, 0.0, -10), p_(0.0, 5.0, -10.0), p_(5.0, 0.0, -10.0))
+    p_diff = (p_out - p_in)/20.0  # 20.0 is a length of a pipe
+    rm.save_pressure(pressure, p_diff)
+
+
+# Common functions =====================================================================================================
+solver_vel = None
+solver_p = None
+null_space = None
+
+
+def set_projection_solvers():
+    global solver_p, solver_vel, null_space
+
+    if args.solvers == 'direct':
+        solver_vel = LUSolver('mumps')
+        solver_p = LUSolver('mumps')
+    else:
+        solver_vel = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
+        solver_p = KrylovSolver('cg', args.prec)          # symmetric > CG TODO zkusit 'ilu' predpodminovac
+        # solver_p = KrylovSolver('gmres', 'hypre_amg')     # NT this, with disabled setnullspace gives same oscilations
+        options = {'absolute_tolerance': 10E-12, 'relative_tolerance': 10**(-args.precision),
+                   'monitor_convergence': True, 'maximum_iterations': 500}
+
+    # Get the nullspace if there are no pressure boundary conditions
+    foo = Function(Q)     # auxiliary vector for setting pressure nullspace
+    if args.bc == 'nullspace':
+        null_vec = Vector(foo.vector())
+        Q.dofmap().set(null_vec, 1.0)
+        null_vec *= 1.0/null_vec.norm('l2')
+        null_space = VectorSpaceBasis([null_vec])
+        as_backend_type(A0).set_nullspace(null_space)  # IMP maybe with ILU preconditioner?
+        # solver_p.set_nullspace(null_space)  # IMP deprecated for KrylovSolver, not working for direct solver
+
+    # apply global options for Krylov solvers
+    if args.solvers == 'krylov':
+        for solver in [solver_vel, solver_p]:
+            for key, value in options.items():
+                try:
+                    solver.parameters[key] = value
+                except KeyError:
+                    print('Invalid option %s for KrylovSolver' % key)
+                    exit()
+            solver.parameters['preconditioner']['structure'] = 'same'
+
 
 # Explicit Chorin method================================================================================================
-if str_method == "chorinExpl":
+if args.method == "chorinExpl":
     info("Initialization of explicit Chorin method")
     tic()
 
@@ -236,7 +269,7 @@ if str_method == "chorinExpl":
 
     # Create functions
     u0 = Function(V)
-    if str_type == "pulsePrec":
+    if args.type == "pulsePrec":
         assign(u0, u_prec)
     if rm.doSave:
         rm.save_vel(False, u0, 0.0)
@@ -267,28 +300,7 @@ if str_method == "chorinExpl":
     A2 = assemble(a2)
     A3 = assemble(a3)
 
-    # Use amg preconditioner if available
-    prec = "amg" if has_krylov_solver_preconditioner("amg") else "default"
-    info("Preconditioning: " + prec)
-
-    # Create solvers; solver02 for tentative and finalize
-    #                 solver1 for projection
-    if useDirectSolvers:
-        solver_vel = LUSolver('mumps')
-        solver_p = LUSolver('mumps')
-    else:
-        solver_vel = KrylovSolver('gmres', 'default')   # nonsymetric > gmres
-        solver_p = KrylovSolver('cg', prec)          # symmetric > CG
-        options = {'absolute_tolerance': 10**(-precision), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True}
-        # apply global options for Krylov solvers
-        for solver in [solver_vel, solver_p]:
-            for key, value in options.items():
-                try:
-                    solver.parameters[key] = value
-                except KeyError:
-                    print('Invalid option %s for KrylovSolver' % key)
-                    exit()
-            solver.parameters['preconditioner']['structure'] = 'same'
+    set_projection_solvers()
 
     # Time-stepping
     info("Running of explicit Chorin method")
@@ -307,7 +319,7 @@ if str_method == "chorinExpl":
         try:
             solver_vel.solve(A1, u1.vector(), b1)
         except RuntimeError as inst:
-            rm.report_fail(str_name, dt, t)
+            rm.report_fail(args.name, dt, t)
             exit()
         rm.compute_err(True, u1, t)
         rm.compute_div(True, u1)
@@ -323,13 +335,9 @@ if str_method == "chorinExpl":
         try:
             solver_p.solve(A2, p1.vector(), b2)
         except RuntimeError as inst:
-            rm.report_fail(str_name, dt, t)
+            rm.report_fail(args.name, dt, t)
             exit()
-        # Report pressure gradient
-        p_in = assemble((1.0/area) * p1 * dsIn)
-        p_out = assemble((1.0/area) * p1 * dsOut)
-        p_diff = (p_out - p_in)/20.0  # 20.0 is a length of a pipe
-        rm.save_pressure(p1, p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+        save_pressure(p1)
         end()
 
         # Velocity correction
@@ -339,7 +347,7 @@ if str_method == "chorinExpl":
         try:
             solve(A3, u1.vector(), b3, "gmres", "default")
         except RuntimeError as inst:
-            rm.report_fail(str_name, dt, t)
+            rm.report_fail(args.name, dt, t)
             exit()
         rm.compute_err(False, u1, t)
         rm.compute_div(False, u1)
@@ -357,7 +365,7 @@ if str_method == "chorinExpl":
 # Incremental pressure correction scheme with explicit nonlinear term ==================================================
 # incremental = extrapolate pressure from previous steps (here: use previous step)
 # viscosity term treated semi-explicitly (Crank-Nicholson)
-if str_method == 'ipcs0' or str_method == 'ipcs0p':
+if args.method == 'ipcs0':
     info("Initialization of Incremental pressure correction scheme n. 0")
     tic()
 
@@ -367,7 +375,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
     outflow = DirichletBC(Q, 0.0, facet_function, 3)  # we can choose, whether to use it, or use projection to nullspace
     bcu = [inflow, bc0]
     bcp = []                    # QQ can I use pressure BC when I use grad(p) in velocity?
-    if pressure_BC:             # QQ what approach is better? Compare!
+    if args.bc == 'outflow':             # QQ what approach is better? Compare!
         bcp = [outflow]
 
     # Define trial and test functions
@@ -379,7 +387,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
     # Initial conditions
     u0 = Function(V)
     p0 = Function(Q)
-    if str_type == "pulsePrec":
+    if args.type == "pulsePrec":
         assign(u0, u_prec)
         assign(p0, p_prec)
     if rm.doSave:
@@ -413,35 +421,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
     A1 = assemble(a1)
     A2 = assemble(a2)
 
-    # Create solvers; solver02 for tentative and finalize
-    #                 solver1 for projection
-    if useDirectSolvers:
-        solver_vel = LUSolver('mumps')
-        solver_p = LUSolver('mumps')
-    else:
-        solver_vel = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
-        solver_p = KrylovSolver('cg', 'hypre_amg')          # symmetric > CG
-        options = {'absolute_tolerance': 10**(-precision), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True}
-
-    # Get the nullspace if there are no pressure boundary conditions
-    foo = Function(Q)     # auxiliary vector for setting pressure nullspace
-    if not bcp:
-        null_vec = Vector(foo.vector())
-        Q.dofmap().set(null_vec, 1.0)
-        null_vec *= 1.0/null_vec.norm('l2')
-        null_space = VectorSpaceBasis([null_vec])
-        solver_p.set_nullspace(null_space)
-
-    # apply global options for Krylov solvers
-    if not useDirectSolvers:
-        for solver in [solver_vel, solver_p]:
-            for key, value in options.items():
-                try:
-                    solver.parameters[key] = value
-                except KeyError:
-                    print('Invalid option %s for KrylovSolver' % key)
-                    exit()
-            solver.parameters['preconditioner']['structure'] = 'same'
+    set_projection_solvers()
 
     # Time-stepping
     info("Running of Incremental pressure correction scheme n. 0")
@@ -460,7 +440,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         try:
             solver_vel.solve(A0, u1.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, dt, t)
+            rm.report_fail(args.name, dt, t)
             exit()
         rm.compute_err(True, u1, t)
         rm.compute_div(True, u1)
@@ -472,18 +452,14 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         begin("Computing pressure correction")
         b = assemble(L1)
         [bc.apply(A1, b) for bc in bcp]
-        if not bcp:
+        if args.bc == 'nullspace':
             null_space.orthogonalize(b)
         try:
             solver_p.solve(A1, p1.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, dt, t)
+            rm.report_fail(args.name, dt, t)
             exit()
-        # Report pressure gradient
-        p_in = assemble((1.0/area) * p1 * dsIn)
-        p_out = assemble((1.0/area) * p1 * dsOut)
-        p_diff = (p_out - p_in)/20.0  # 20.0 is a length of a pipe
-        rm.save_pressure(p1, p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+        save_pressure(p1)
         end()
 
         b = assemble(L2)
@@ -491,7 +467,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
         try:
             solver_vel.solve(A2, u1.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, dt, t)
+            rm.report_fail(args.name, dt, t)
             exit()
         rm.compute_err(False, u1, t)
         rm.compute_div(False, u1)
@@ -510,7 +486,7 @@ if str_method == 'ipcs0' or str_method == 'ipcs0p':
 # Incremental pressure correction with nonlinearity treated by Adam-Bashword + Crank-Nicolson. =========================
 # incremental = extrapolate pressure from previous steps (here: use previous step)
 # viscosity term treated semi-explicitly (Crank-Nicholson)
-if str_method == 'ipcs1' or str_method == 'ipcs1p':
+if args.method == 'ipcs1':
     info("Initialization of Incremental pressure correction scheme n. 1")
     tic()
 
@@ -518,11 +494,11 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
     bc0 = DirichletBC(V, noSlip, facet_function, 1)
     inflow = DirichletBC(V, v_in, facet_function, 2)
     # we can choose, whether to use pressure BC, or use projection to nullspace
-    # outflow = DirichletBC(Q, Constant(0.0), facet_function, 3)
-    outflow = DirichletBC(Q, Constant(0.0), "near(x[0],0.0) && near(x[1],0.0) && near(x[2],10.0)", method="pointwise")
+    outflow = DirichletBC(Q, Constant(0.0), facet_function, 3)
+    # outflow = DirichletBC(Q, Constant(0.0), "near(x[0],0.0) && near(x[1],0.0) && near(x[2],10.0)", method="pointwise")
     bcu = [inflow, bc0]
     bcp = []
-    if pressure_BC:
+    if args.bc == 'outflow':
         bcp = [outflow]
 
     # Define trial and test functions
@@ -536,7 +512,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
     u1 = Function(V)  # velocity two time steps back
     p0 = Function(Q)  # previous pressure
 
-    if str_type == "pulsePrec":
+    if args.type == "pulsePrec":
         assign(u0, u_prec)
         assign(u1, u_prec)
         assign(p0, p_prec)
@@ -575,38 +551,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
     A1 = assemble(a1)
     A2 = assemble(a2)
 
-    # Create solvers; solver_vel for tentative and finalize
-    #                 solver_p for projection
-    if useDirectSolvers:
-        solver_vel = LUSolver('mumps')
-        solver_p = LUSolver('mumps')
-    else:
-        solver_vel = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
-        solver_p = KrylovSolver('cg', 'hypre_amg')          # symmetric > CG TODO zkusit 'ilu' predpodminovac
-        # solver_p = KrylovSolver('gmres', 'hypre_amg')     # NT this, with disabled setnullspace gives same oscilations
-        options = {'absolute_tolerance': 10**(-precision), 'relative_tolerance': 10**(-precision), 'monitor_convergence': True,
-                   'maximum_iterations': 500}
-
-    # Get the nullspace if there are no pressure boundary conditions
-    foo = Function(Q)     # auxiliary vector for setting pressure nullspace
-    if not bcp:
-        null_vec = Vector(foo.vector())
-        Q.dofmap().set(null_vec, 1.0)
-        null_vec *= 1.0/null_vec.norm('l2')
-        null_space = VectorSpaceBasis([null_vec])
-        as_backend_type(A0).set_nullspace(null_space)
-        # solver_p.set_nullspace(null_space)  # IMP deprecated for KrylovSolver, not working for direct solver
-
-    # apply global options for Krylov solvers
-    if not useDirectSolvers:
-        for solver in [solver_vel, solver_p]:
-            for key, value in options.items():
-                try:
-                    solver.parameters[key] = value
-                except KeyError:
-                    print('Invalid option %s for KrylovSolver' % key)
-                    exit()
-            solver.parameters['preconditioner']['structure'] = 'same'
+    set_projection_solvers()
 
     # Time-stepping
     info("Running of Incremental pressure correction scheme n. 1")
@@ -630,7 +575,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         try:
             solver_vel.solve(A0, u_.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, dt, t)
+            rm.report_fail(args.name, dt, t)
             exit()
         rm.compute_err(True, u_, t)
         rm.compute_div(True, u_)
@@ -647,14 +592,9 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         try:
             solver_p.solve(A1, p_.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, dt, t)
+            rm.report_fail(args.name, dt, t)
             exit()
-        # Report pressure gradient
-        p_in = assemble((1.0/area) * p_ * dsIn)
-        p_out = assemble((1.0/area) * p_ * dsOut)
-        # print(p_in, p_(0.0, 0.0, -10), p_(0.0, 5.0, -10.0), p_(5.0, 0.0, -10.0))
-        p_diff = (p_out - p_in)/20.0  # 20.0 is a length of a pipe
-        rm.save_pressure(p_, p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+        save_pressure(p_)
         end()
 
         b = assemble(L2)
@@ -662,7 +602,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
         try:
             solver_vel.solve(A2, u_.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(str_name, dt, t)
+            rm.report_fail(args.name, dt, t)
             exit()
         rm.compute_err(False, u_, t)
         rm.compute_div(False, u_)
@@ -680,7 +620,7 @@ if str_method == 'ipcs1' or str_method == 'ipcs1p':
     info("Finished: Incremental pressure correction scheme n. 1")
 
 # Direct method=========================================================================================================
-if str_method == "direct":
+if args.method == "direct":
     info("Initialization of direct method")
     tic()
 
@@ -708,7 +648,7 @@ if str_method == "direct":
 
     # Define fields for time dependent case
     u0 = Function(V)  # velocity from previous time step
-    if str_type == "pulsePrec":
+    if args.type == "pulsePrec":
         assign(u0, u_prec)
     if rm.doSave:
         rm.save_vel(False, u0, 0.0)
@@ -750,7 +690,7 @@ if str_method == "direct":
         try:
             NS_solver.solve()
         except RuntimeError as inst:
-            rm.report_fail(str_name, dt, t)
+            rm.report_fail(args.name, dt, t)
             exit()
         end()
 
@@ -763,11 +703,7 @@ if str_method == "direct":
         if rm.doSave:
             rm.save_vel(False, velSp, t)
             rm.save_div(False, u)
-        # Report pressure gradient
-        p_in = assemble((1.0/area) * p * dsIn)
-        p_out = assemble((1.0/area) * p * dsOut)
-        p_diff = (p_out - p_in)/20.0  # 20.0 is a length of a pipe
-        rm.save_pressure(p, p_diff, womersleyBC.analytic_pressure_grad(factor, t))
+        save_pressure(p1)
         rm.compute_div(False, u)
         rm.compute_err(False, u, t)
 
@@ -778,4 +714,4 @@ if str_method == "direct":
     info("Finished: direct method")
 
 # Report
-rm.report(dt, ttime, str_name, str_type, str_method, meshName, mesh, factor, str_solver)
+rm.report(dt, ttime, args.name, args.type, args.method, meshName, mesh, factor, str_solver)  # TODO clean arguments

@@ -59,3 +59,8 @@ def average_analytic_pressure_grad(factor):
 
 def analytic_pressure_grad(factor, t):
     return factor * p_lambda(t)
+
+
+def analytic_pressure(factor, t):
+    gradient = analytic_pressure_grad(factor, t)
+    return Expression("factor*grad*x[2]", factor=factor, grad=gradient)

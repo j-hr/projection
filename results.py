@@ -4,14 +4,16 @@ __author__ = 'jh'
 
 from dolfin import *
 import os, traceback, math, csv, sys
-
+import womersleyBC
 
 class ResultsManager:
     def __init__(self):
 
-        self.c0_prec = None
-        self.coefs_r_prec = []
-        self.coefs_i_prec = []
+        # partial Bessel functions and coefficients
+        self.bessel_parabolic = None
+        self.bessel_real = []
+        self.bessel_complex = []
+        self.coefs_exp = None
 
         self.str_dir_name = None
         self.doSave = None
@@ -22,34 +24,43 @@ class ResultsManager:
         self.isSteadyFlow = None
 
         self.velocity_norm = None
+        self.pressure_gradient_norm = None
         self.solutionSpace = None
         self.factor = None
         self.solution = None
-        self.coefs_exp = None
         self.time_erc = 0  # total time spent on measuring error
+        self.actual_time = None
+        self.isWholeSecond = False
+        self.stepsInSecond = None
+        self.vel = None
+        self.D = None
+        self.divFunction = None
+        self.pSpace = None
+        self.pgSpace = None
+        self.pgFunction = None
+
+        # lists
         self.time_list = []  # list of times, when error is  measured (used in report)
         self.err_u = []
         self.err_u2 = []
         self.err_ut = []
         self.err_u2t = []
-        self.isWholeSecond = False
-        self.stepsInSecond = None
         self.second_list = []
         self.second_err_u = []
         self.second_err_div = []
         self.second_err_u2 = []
         self.second_err_div2 = []
+        self.second_err_p = []
         self.second_err_pg = []
-
         self.div_u = []
         self.div_u2 = []
+        self.p_err = []
+        self.pg = []
+        self.pg_analytic = []
+        self.pg_err = []
+        self.pg_err_abs = []
 
-        self.p_diff = []
-        self.p_diff_analytic = []
-        self.p_diff_err = []
-        self.p_diff_err_abs = []
-        self.pressure_gradient_norm = None
-
+        # output files
         self.uFile = None
         self.uDiffFile = None
         self.u2File = None
@@ -59,11 +70,37 @@ class ResultsManager:
         self.pFile = None
         self.pgFile = None
         self.pgDiffFile = None
-        self.vel = None
-        self.D = None
-        self.divFunction = None
-        self.PGSpace = None
-        self.pgFunction = None
+
+    def initialize(self, velocity_space, pressure_space, mesh, dir_name, factor, partial_solution_space, solution_space,
+                   mesh_name, dt):
+        print('Initializing output')
+        self.str_dir_name = dir_name
+        self.factor = float(factor)
+        # create directory, needed because of using "with open(..." construction later
+        if not os.path.exists(self.str_dir_name):
+            os.mkdir(self.str_dir_name)
+        if self.doSave:
+            self.vel = Function(velocity_space)
+            self.D = FunctionSpace(mesh, "Lagrange", 1)
+            self.divFunction = Function(self.D)
+            self.pgSpace = VectorFunctionSpace(mesh, "DG", 0)
+            self.pgFunction = Function(self.pgSpace)
+            self.initialize_xdmf_files()
+        self.pSpace = pressure_space
+        self.pressure_gradient_norm = womersleyBC.average_analytic_pressure_grad(self.factor)
+        self.velocity_norm = womersleyBC.average_analytic_velocity(self.factor)
+        print('Initializing error control')
+        self.solutionSpace = solution_space
+        self.stepsInSecond = int(round(1.0 / float(dt)))
+        print("results: stepsInSecond = ", self.stepsInSecond)
+        if self.doErrControl:
+            if not self.isSteadyFlow:
+                self.load_precomputed_bessel_functions(mesh_name, partial_solution_space)
+            else:
+                temp = toc()
+                self.solution = interpolate(
+                    Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"), factor=self.factor), solution_space)
+                print("Prepared analytic solution. Time: %f" % (toc() - temp))
 
     def set_save_mode(self, option):
         if option == 'save' or option == 'diff':
@@ -120,28 +157,12 @@ class ResultsManager:
             self.d2File = XDMFFile(mpi_comm_world(), self.str_dir_name + "/div_tent.xdmf")  # maybe just compute norm
             self.d2File.parameters['rewrite_function_mesh'] = False
 
-    def initialize_output(self, velocity_space, mesh, dir_name, pressure_gradient_norm, velocity_norm):
-        print('Initializing output')
-        self.str_dir_name = dir_name
-        # create directory, needed because of using "with open(..." construction later
-        if not os.path.exists(self.str_dir_name):
-            os.mkdir(self.str_dir_name)
-        if self.doSave:
-            self.vel = Function(velocity_space)
-            self.D = FunctionSpace(mesh, "Lagrange", 1)
-            self.divFunction = Function(self.D)
-            self.PGSpace = VectorFunctionSpace(mesh, "DG", 0)
-            self.pgFunction = Function(self.PGSpace)
-            self.initialize_xdmf_files()
-        self.pressure_gradient_norm = pressure_gradient_norm
-        self.velocity_norm = velocity_norm
-
     def update_time(self, actual_time):
-        actual_time = round(actual_time, 3)
-        self.time_list.append(actual_time)  # round time step to 0.001
-        if actual_time > 0.5 and int(round(actual_time * 1000)) % 1000 == 0:
+        self.actual_time = round(actual_time, 3)
+        self.time_list.append(self.actual_time)  # round time step to 0.001
+        if self.actual_time > 0.5 and int(round(self.actual_time * 1000)) % 1000 == 0:
             self.isWholeSecond = True
-            self.second_list.append(actual_time)
+            self.second_list.append(self.actual_time)
         else:
             self.isWholeSecond = False
 
@@ -166,30 +187,36 @@ class ResultsManager:
             vel_file << self.vel
         print("Saved solution. Time: %f" % (toc() - tmp))
 
-    # method for saving velocity (ensuring, that it will be one time line in ParaView)
-    def save_pressure(self, pressure, computed_gradient, analytic_gradient):
+    # method for saving pressure
+    def save_pressure(self, pressure, computed_gradient):
+        analytic_gradient = womersleyBC.analytic_pressure_grad(self.factor, self.actual_time)
+        analytic_pressure = womersleyBC.analytic_pressure(self.factor, self.actual_time)
         if self.doSave:
             self.pFile << pressure
-            pg = project((1.0 / self.pressure_gradient_norm) * grad(pressure), self.PGSpace)
+            pg = project((1.0 / self.pressure_gradient_norm) * grad(pressure), self.pgSpace)
             self.pgFunction.assign(pg)
             self.pgFile << self.pgFunction
             if self.doSaveDiff:
                 sol_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pressure_gradient_norm)
-                sol = interpolate(sol_expr, self.PGSpace)
+                sol = interpolate(sol_expr, self.pgSpace)
                 # plot(sol)
                 # plot(pg)
                 # plot(pg - sol, interactive=True)
                 # exit()
                 self.pgFunction.assign(pg-sol)
                 self.pgDiffFile << self.pgFunction
-        self.p_diff.append(computed_gradient)
-        self.p_diff_analytic.append(analytic_gradient)
-        self.p_diff_err.append(computed_gradient-analytic_gradient)
-        self.p_diff_err_abs.append(abs(computed_gradient-analytic_gradient))
+        p_solution_expr = analytic_pressure
+        p_solution = interpolate(p_solution_expr, self.pSpace)
+        self.p_err.append(errornorm(p_solution, pressure, norm_type="l2", degree_rise=0))
+        self.pg.append(computed_gradient)
+        self.pg_analytic.append(analytic_gradient)
+        self.pg_err.append(computed_gradient-analytic_gradient)
+        self.pg_err_abs.append(abs(computed_gradient-analytic_gradient))
         if self.isWholeSecond:
-            N1 = len(self.p_diff_err)
+            N1 = len(self.pg_err)
             N0 = N1 - self.stepsInSecond
-            self.second_err_pg.append(sum(self.p_diff_err_abs[N0:N1]) / self.stepsInSecond)
+            self.second_err_pg.append(sum(self.pg_err_abs[N0:N1]) / self.stepsInSecond)
+            self.second_err_p.append(sum(self.p_err[N0:N1]) / self.stepsInSecond)
 
     def report_fail(self, str_name, dt, t):
         print("Runtime error:", sys.exc_info()[1])
@@ -212,29 +239,16 @@ class ResultsManager:
         print("Computed norm of divergence. Time: %f" % (toc() - tmp))
 
 # Error control=========================================================================================================
-    def initialize_error_control(self, factor, PS, V, mesh_name, dt):
-        self.solutionSpace = V
-        self.factor = float(factor)
-        self.stepsInSecond = int(round(1.0 / float(dt)))
-        print("results: stepsInSecond = ", self.stepsInSecond)
-        if self.doErrControl:
-            if not self.isSteadyFlow:
-                self.load_precomputed_bessel_functions(mesh_name, PS)
-            else:
-                temp = toc()
-                self.solution = interpolate(
-                    Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"), factor=self.factor), V)
-                print("Prepared analytic solution. Time: %f" % (toc() - temp))
 
     def assemble_solution(self, t):  # returns Womersley sol for time t
         tmp = toc()
         sol = Function(self.solutionSpace)
         dofs2 = self.solutionSpace.sub(2).dofmap().dofs()  # gives field of indices corresponding to z axis
         sol.assign(Constant(("0.0", "0.0", "0.0")))
-        sol.vector()[dofs2] += self.factor * self.c0_prec.vector().array()  # parabolic part of sol
+        sol.vector()[dofs2] += self.factor * self.bessel_parabolic.vector().array()  # parabolic part of sol
         for idx in range(8):  # add modes of Womersley sol
-            sol.vector()[dofs2] += self.factor * cos(self.coefs_exp[idx] * pi * t) * self.coefs_r_prec[idx].vector().array()
-            sol.vector()[dofs2] += self.factor * -sin(self.coefs_exp[idx] * pi * t) * self.coefs_i_prec[idx].vector().array()
+            sol.vector()[dofs2] += self.factor * cos(self.coefs_exp[idx] * pi * t) * self.bessel_real[idx].vector().array()
+            sol.vector()[dofs2] += self.factor * -sin(self.coefs_exp[idx] * pi * t) * self.bessel_complex[idx].vector().array()
         print("Assembled analytic solution. Time: %f" % (toc() - tmp))
         return sol
 
@@ -278,12 +292,12 @@ class ResultsManager:
         temp = toc()
         fce = Function(PS)
         f.read(fce, "parab")
-        self.c0_prec = Function(fce)
+        self.bessel_parabolic = Function(fce)
         for i in range(8):
             f.read(fce, "real%d" % i)
-            self.coefs_r_prec.append(Function(fce))
+            self.bessel_real.append(Function(fce))
             f.read(fce, "imag%d" % i)
-            self.coefs_i_prec.append(Function(fce))
+            self.bessel_complex.append(Function(fce))
             # plot(coefs_r_prec[i], title="coefs_r_prec", interactive=True) # reasonable values
             # plot(coefs_i_prec[i], title="coefs_i_prec", interactive=True) # reasonable values
         # plot(c0_prec,title="c0_prec",interactive=True) # reasonable values
@@ -337,19 +351,20 @@ class ResultsManager:
             total_err_u = math.sqrt(sum(self.err_u))
             total_err_u2 = math.sqrt(sum(self.err_u2))
 
-            total_err_pg = sum(self.p_diff_err)
+            total_err_pg = sum(self.pg_err)
             avg_err_pg = total_err_pg * dt / ttime
-            N1 = len(self.p_diff_err)
-            N0 = int(round(N1 - 1.0/dt))
-            last_cycle_err_pg = sum(self.p_diff_err[N0:N1])*dt
+            N1 = len(self.pg_err)
+            N0 = N1 - self.stepsInSecond
+            last_cycle_err_pg = sum(self.pg_err[N0:N1])*dt
 
             avg_err_u = total_err_u / math.sqrt(len(self.time_list))
             avg_err_u2 = total_err_u2 / math.sqrt(len(self.time_list))
 
-            last_cycle = self.time_list[N0:N1]
+            # last_cycle = self.time_list[N0:N1]
             # print("N0,N1: ",N0, N1 ," len: ",len(last_cycle), " list: ",last_cycle)
             last_cycle_err_u = math.sqrt(sum(self.err_u[N0:N1]) * dt)
             last_cycle_div = sum(self.div_u[N0:N1]) * dt
+            last_cycle_err_p = sum(self.p_err[N0:N1]) * dt
             last_cycle_err_min = math.sqrt(min(self.err_u[N0:N1]))
             last_cycle_err_max = math.sqrt(max(self.err_u[N0:N1]))
             if self.hasTentativeVel:
@@ -381,26 +396,29 @@ class ResultsManager:
             report_writer.writerow([str_name] + ["divergence_corrected"] + [str_name + "_DC"] + self.div_u)
             if self.hasTentativeVel:
                 report_writer.writerow([str_name] + ["divergence_tentative"] + [str_name + "_DT"] + self.div_u2)
-            report_writer.writerow([str_name] + ["analytic_pressure_gradient"] + ["analytic"] + self.p_diff_analytic)
-            report_writer.writerow([str_name] + ["computed_pressure_gradient"] + [str_name + "_PG"] + self.p_diff)
-            report_writer.writerow([str_name] + ["pressure_gradient_error"] + [str_name + "_PGE"] + self.p_diff_err)
-            report_writer.writerow([str_name] + ["pressure_gradient_error_abs"] + [str_name + "_PGEA"] + self.p_diff_err_abs)
-            p_diff_analytic = [i/self.factor for i in self.p_diff_analytic]
-            p_diff = [i/self.factor for i in self.p_diff]
-            p_diff_err = [i/self.factor for i in self.p_diff_err]
-            p_diff_err_abs = [i/self.factor for i in self.p_diff_err_abs]
+            report_writer.writerow([str_name] + ["analytic_pressure_gradient"] + ["analytic"] + self.pg_analytic)
+            report_writer.writerow([str_name] + ["computed_pressure_gradient"] + [str_name + "_PG"] + self.pg)
+            report_writer.writerow([str_name] + ["pressure_error"] + [str_name + "_PE"] + self.p_err)
+            report_writer.writerow([str_name] + ["pressure_gradient_error"] + [str_name + "_PGE"] + self.pg_err)
+            report_writer.writerow([str_name] + ["pressure_gradient_error_abs"] + [str_name + "_PGEA"] + self.pg_err_abs)
+            p_diff_analytic = [i/self.factor for i in self.pg_analytic]
+            p_err = [i/self.factor for i in self.p_err]
+            p_diff = [i/self.factor for i in self.pg]
+            p_diff_err = [i/self.factor for i in self.pg_err]
+            p_diff_err_abs = [i/self.factor for i in self.pg_err_abs]
             report_writer.writerow([str_name] + ["scaled_analytic_pressure_gradient"] + ["analytic_scaled"] + p_diff_analytic)
             report_writer.writerow([str_name] + ["scaled_computed_pressure_gradient"] + [str_name + "_PGs"] + p_diff)
+            report_writer.writerow([str_name] + ["scaled_pressure_error"] + [str_name + "_PEs"] + p_err)
             report_writer.writerow([str_name] + ["scaled_pressure_gradient_error"] + [str_name + "_PGEs"] + p_diff_err)
             report_writer.writerow([str_name] + ["scaled_pressure_gradient_error_abs"] + [str_name + "_PGEAs"] + p_diff_err_abs)
-            self.p_diff_analytic = [i/self.pressure_gradient_norm for i in self.p_diff_analytic]
-            self.p_diff = [i/self.pressure_gradient_norm for i in self.p_diff]
-            self.p_diff_err = [i/self.pressure_gradient_norm for i in self.p_diff_err]
-            self.p_diff_err_abs = [i/self.pressure_gradient_norm for i in self.p_diff_err_abs]
-            report_writer.writerow([str_name] + ["normalized_analytic_pressure_gradient"] + ["analytic_normalized"] + self.p_diff_analytic)
-            report_writer.writerow([str_name] + ["normalized_computed_pressure_gradient"] + [str_name + "_PGn"] + self.p_diff)
-            report_writer.writerow([str_name] + ["normalized_pressure_gradient_error"] + [str_name + "_PGEn"] + self.p_diff_err)
-            report_writer.writerow([str_name] + ["normalized_pressure_gradient_error_abs"] + [str_name + "_PGEAn"] + self.p_diff_err_abs)
+            self.pg_analytic = [i/self.pressure_gradient_norm for i in self.pg_analytic]
+            self.pg = [i/self.pressure_gradient_norm for i in self.pg]
+            self.pg_err = [i/self.pressure_gradient_norm for i in self.pg_err]
+            self.pg_err_abs = [i/self.pressure_gradient_norm for i in self.pg_err_abs]
+            report_writer.writerow([str_name] + ["normalized_analytic_pressure_gradient"] + ["analytic_normalized"] + self.pg_analytic)
+            report_writer.writerow([str_name] + ["normalized_computed_pressure_gradient"] + [str_name + "_PGn"] + self.pg)
+            report_writer.writerow([str_name] + ["normalized_pressure_gradient_error"] + [str_name + "_PGEn"] + self.pg_err)
+            report_writer.writerow([str_name] + ["normalized_pressure_gradient_error_abs"] + [str_name + "_PGEAn"] + self.pg_err_abs)
 
         # report error norm, norm of div, and pressure gradients averaged over seconds
         with open(self.str_dir_name + "/report_seconds.csv", 'w') as reportFile:
@@ -418,6 +436,9 @@ class ResultsManager:
             report_writer.writerow([str_name] + ["divergence_corrected"] + self.second_err_div)
             if self.hasTentativeVel:
                 report_writer.writerow([str_name] + ["divergence_tentative"] + self.second_err_div2)
+            report_writer.writerow([str_name] + ["pressure_error"] + self.second_err_p)
+            self.second_err_p = [i/self.factor for i in self.second_err_p]
+            report_writer.writerow([str_name] + ["pressure_error_scaled"] + self.second_err_p)
             report_writer.writerow([str_name] + ["pressure_gradient_error"] + self.second_err_pg)
             self.second_err_pg = [i/self.factor for i in self.second_err_pg]
             report_writer.writerow([str_name] + ["pressure_gradient_error_scaled"] + self.second_err_pg)
@@ -438,13 +459,13 @@ class ResultsManager:
             report_writer.writerow(
                 ["problem"] + ["name"] + ["type"] + ["method"] + ["mesh_name"] + ["mesh"] + ["solver"] + ["factor"] +
                 ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"] +
-                ["avg_err_u"] + ["avg_err_u2"] + ["last_cycle_err_u"] + ["last_cycle_err_u2"] + ["last_cycle_div"] +
+                ["avg_err_u"] + ["avg_err_u2"] + ["last_cycle_err_u"] + ["last_cycle_err_u2"] + ["last_cycle_err_p"] + ["last_cycle_div"] +
                 ["last_cycle_div2"] + ["last_cycle_err_min"] + ["last_cycle_err_max"] + ["last_cycle_err_min2"] +
                 ["last_cycle_err_max2"] + ["avg_err_pg"] + ["last_cycle_err_pg"])
             report_writer.writerow(
                 ["pipe_test"] + [str_name] + [str_type] + [str_method] + [mesh_name] + [mesh] + [str_solver] +
                 [factor] + [ttime] + [dt] + [total - self.time_erc] + [self.time_erc] + [total_err_u] + [total_err_u2] +
-                [avg_err_u] + [avg_err_u2] + [last_cycle_err_u] + [last_cycle_err_u2] + [last_cycle_div] +
+                [avg_err_u] + [avg_err_u2] + [last_cycle_err_u] + [last_cycle_err_u2] + [last_cycle_err_p] + [last_cycle_div] +
                 [last_cycle_div2] + [last_cycle_err_min] + [last_cycle_err_max] + [last_cycle_err_min2] +
                 [last_cycle_err_max2] + [avg_err_pg] + [last_cycle_err_pg])
 
