@@ -63,4 +63,4 @@ def analytic_pressure_grad(factor, t):
 
 def analytic_pressure(factor, t):
     gradient = analytic_pressure_grad(factor, t)
-    return Expression("factor*grad*x[2]", factor=factor, grad=gradient)
+    return Expression("grad*x[2]", factor=factor, grad=gradient)

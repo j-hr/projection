@@ -36,6 +36,7 @@ class ResultsManager:
         self.D = None
         self.divFunction = None
         self.pSpace = None
+        self.pFunction = None
         self.pgSpace = None
         self.pgFunction = None
 
@@ -68,6 +69,7 @@ class ResultsManager:
         self.dFile = None
         self.d2File = None
         self.pFile = None
+        self.pDiffFile = None
         self.pgFile = None
         self.pgDiffFile = None
 
@@ -79,14 +81,15 @@ class ResultsManager:
         # create directory, needed because of using "with open(..." construction later
         if not os.path.exists(self.str_dir_name):
             os.mkdir(self.str_dir_name)
+        self.pSpace = pressure_space
         if self.doSave:
             self.vel = Function(velocity_space)
             self.D = FunctionSpace(mesh, "Lagrange", 1)
             self.divFunction = Function(self.D)
             self.pgSpace = VectorFunctionSpace(mesh, "DG", 0)
             self.pgFunction = Function(self.pgSpace)
+            self.pFunction = Function(self.pSpace)
             self.initialize_xdmf_files()
-        self.pSpace = pressure_space
         self.pressure_gradient_norm = womersleyBC.average_analytic_pressure_grad(self.factor)
         self.velocity_norm = womersleyBC.average_analytic_velocity(self.factor)
         print('Initializing error control')
@@ -142,6 +145,8 @@ class ResultsManager:
             self.uDiffFile.parameters['rewrite_function_mesh'] = False
             self.pgDiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_grad_diff.xdmf")
             self.pgDiffFile.parameters['rewrite_function_mesh'] = False
+            self.pDiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_diff.xdmf")
+            self.pDiffFile.parameters['rewrite_function_mesh'] = False
         self.dFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/divergence.xdmf")  # maybe just compute norm
         self.dFile.parameters['rewrite_function_mesh'] = False
         self.pFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure.xdmf")
@@ -192,18 +197,21 @@ class ResultsManager:
         analytic_gradient = womersleyBC.analytic_pressure_grad(self.factor, self.actual_time)
         analytic_pressure = womersleyBC.analytic_pressure(self.factor, self.actual_time)
         if self.doSave:
-            self.pFile << pressure
+            self.pFile << pressure   # IMP DONT work
             pg = project((1.0 / self.pressure_gradient_norm) * grad(pressure), self.pgSpace)
             self.pgFunction.assign(pg)
             self.pgFile << self.pgFunction
             if self.doSaveDiff:
-                sol_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pressure_gradient_norm)
-                sol = interpolate(sol_expr, self.pgSpace)
-                # plot(sol)
-                # plot(pg)
-                # plot(pg - sol, interactive=True)
+                sol_pg_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pressure_gradient_norm)
+                sol_pg = interpolate(sol_pg_expr, self.pgSpace)
+                sol_p = interpolate(analytic_pressure, self.pSpace)
+                # plot(sol_p, title="sol")
+                # plot(pressure, title="p")
+                # plot(pressure - sol_p, interactive=True, title="diff")
                 # exit()
-                self.pgFunction.assign(pg-sol)
+                self.pFunction.assign(pressure-sol_p)
+                self.pDiffFile << self.pFunction
+                self.pgFunction.assign(pg-sol_pg)
                 self.pgDiffFile << self.pgFunction
         p_solution_expr = analytic_pressure
         p_solution = interpolate(p_solution_expr, self.pSpace)
@@ -351,11 +359,11 @@ class ResultsManager:
             total_err_u = math.sqrt(sum(self.err_u))
             total_err_u2 = math.sqrt(sum(self.err_u2))
 
-            total_err_pg = sum(self.pg_err)
+            total_err_pg = sum(self.pg_err_abs)
             avg_err_pg = total_err_pg * dt / ttime
             N1 = len(self.pg_err)
             N0 = N1 - self.stepsInSecond
-            last_cycle_err_pg = sum(self.pg_err[N0:N1])*dt
+            last_cycle_err_pg = sum(self.pg_err_abs[N0:N1])*dt
 
             avg_err_u = total_err_u / math.sqrt(len(self.time_list))
             avg_err_u2 = total_err_u2 / math.sqrt(len(self.time_list))

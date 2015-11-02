@@ -47,6 +47,11 @@ import results
 
 tic()
 
+if not has_linear_algebra_backend("PETSc"):
+    info("DOLFIN has not been configured with PETSc. Exiting.")
+    exit()
+parameters["linear_algebra_backend"] = "PETSc"
+
 # Debugging ============================================================================================================
 # set_log_level(DEBUG)
 PETScOptions.set('mat_mumps_icntl_4', 0)  # 1-3 gives lots of information for mumps direct solvers
@@ -77,9 +82,11 @@ parser.add_argument('-p', '--precision', help='Krylov solver precision', type=in
 parser.add_argument('-b', '--bc', help='Pressure boundary condition mode', choices=['outflow', 'nullspace', 'lagrange'],
                     default='outflow')
 parser.add_argument('-n', '--name', default='test')
+parser.add_argument('-r', help='Use rotation scheme', action='store_true')
 
 args = parser.parse_args()
 print(args)
+
 print("Problem type: " + args.type)
 rm = results.ResultsManager()
 rm.set_save_mode(args.save)
@@ -128,6 +135,9 @@ print("Mesh norm min: ", mesh.hmin())
 V = VectorFunctionSpace(mesh, "Lagrange", 2)  # velocity
 Q = FunctionSpace(mesh, "Lagrange", 1)  # pressure
 PS = FunctionSpace(mesh, "Lagrange", 2)  # partial solution (must be same order as V)
+if args.bc == 'lagrange':
+    L = FunctionSpace(mesh, "R", 0)
+    QL = Q*L
 
 # fixed parameters (used in analytic solution and in BC)
 nu = 3.71  # kinematic viscosity
@@ -199,6 +209,7 @@ def save_pressure(pressure):
     # normalize pressure
     p_average = assemble((1.0/volume) * pressure * dx)
     p_average_function = interpolate(Expression("p", p=p_average), Q)
+    # print(p_average_function, pressure, pressure_Q)
     pressure.assign(pressure - p_average_function)
     # Report pressure gradient
     p_in = assemble((1.0/area) * pressure * dsIn)
@@ -222,7 +233,10 @@ def set_projection_solvers():
         solver_p = LUSolver('mumps')
     else:
         solver_vel = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
-        solver_p = KrylovSolver('cg', args.prec)          # symmetric > CG TODO zkusit 'ilu' predpodminovac
+        if args.bc == 'lagrange':
+            solver_p = KrylovSolver('gmres')          # nonsymmetric?
+        else:
+            solver_p = KrylovSolver('cg', args.prec)          # symmetric > CG TODO zkusit 'ilu' predpodminovac
         # solver_p = KrylovSolver('gmres', 'hypre_amg')     # NT this, with disabled setnullspace gives same oscilations
         options = {'absolute_tolerance': 10E-12, 'relative_tolerance': 10**(-args.precision),
                    'monitor_convergence': True, 'maximum_iterations': 500}
@@ -261,7 +275,7 @@ if args.method == "chorinExpl":
     bcu = [inflow, bc0]
     bcp = [outflow]
 
-    # Define trial and test functions
+    # Define and test functions
     u = TrialFunction(V)
     p = TrialFunction(Q)
     v = TestFunction(V)
@@ -503,9 +517,13 @@ if args.method == 'ipcs1':
 
     # Define trial and test functions
     u = TrialFunction(V)
-    p = TrialFunction(Q)
     v = TestFunction(V)
-    q = TestFunction(Q)
+    if args.bc == 'lagrange':
+        (p, r) = TrialFunction(QL)
+        (q, l) = TestFunction(QL)
+    else:
+        p = TrialFunction(Q)
+        q = TestFunction(Q)
 
     # Initial conditions
     u0 = Function(V)  # velocity at previous time step
@@ -521,7 +539,12 @@ if args.method == 'ipcs1':
         rm.save_vel(True, u0, 0.0)
 
     u_ = Function(V)         # current velocity
-    p_ = Function(Q)         # current pressure
+    if args.bc == 'lagrange':
+        p_ = Function(QL)    # current pressure or pressure help function from rotation scheme
+        pQ = Function(Q)     # auxiliary function for conversion between QL.sub(0) and Q
+    else:
+        p_ = Function(Q)         # current pressure or pressure help function from rotation scheme
+    p_mod = Function(Q)      # current modified pressure from rotation scheme
 
     # Define coefficients
     k = Constant(dt)
@@ -538,20 +561,47 @@ if args.method == 'ipcs1':
         - inner(f, v)*dx     # solve to u_
     a0, L0 = system(F0)
 
-    # Projection, solve to p_
-    F1 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
+    if args.r :
+        # Rotation scheme
+        if args.bc == 'lagrange':
+            F1 = inner(grad(p), grad(q))*dx + (1./k)*q*div(u_)*dx + p*l*dx + q*r*dx
+        else:
+            F1 = inner(grad(p), grad(q))*dx + (1./k)*q*div(u_)*dx
+    else:
+        # Projection, solve to p_
+        if args.bc == 'lagrange':
+            F1 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx + p*l*dx + q*r*dx
+        else:
+            F1 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
     a1, L1 = system(F1)
 
     # Finalize, solve to u_
-    F2 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_ - p0), v)*dx
+    if args.r :
+        # Rotation scheme
+        F2 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_), v)*dx
+    else:
+        if args.bc == 'lagrange':
+            F2 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_.sub(0) - p0), v)*dx
+        else:
+            F2 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_ - p0), v)*dx
     a2, L2 = system(F2)
+
+    if args.r :
+        # Rotation scheme: modify pressure
+        F3 = (p - p0 - p_ + nu*div(u_))*q*dx
+        a3, L3 = system(F3)
 
     # Assemble matrices
     A0 = assemble(a0)
     A1 = assemble(a1)
     A2 = assemble(a2)
+    if args.r :
+        A3 = assemble(a3)
 
     set_projection_solvers()
+
+    if args.bc == 'lagrange':
+        fa = FunctionAssigner(Q, QL.sub(0))
 
     # Time-stepping
     info("Running of Incremental pressure correction scheme n. 1")
@@ -574,6 +624,7 @@ if args.method == 'ipcs1':
         [bc.apply(A0, b) for bc in bcu]
         try:
             solver_vel.solve(A0, u_.vector(), b)
+
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
             exit()
@@ -584,19 +635,25 @@ if args.method == 'ipcs1':
             rm.save_div(True, u_)
         end()
 
-        begin("Computing pressure correction")
+        begin("Computing pressure")
         b = assemble(L1)
         [bc.apply(A1, b) for bc in bcp]
-        if not bcp:
+        if args.bc == 'nullspace':
             null_space.orthogonalize(b)
         try:
             solver_p.solve(A1, p_.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
             exit()
-        save_pressure(p_)
+        if not args.r:
+            if args.bc == 'lagrange':
+                fa.assign(pQ, p_.sub(0))
+                save_pressure(pQ)
+            else:
+                save_pressure(p_)
         end()
 
+        begin("Computing corrected velocity")
         b = assemble(L2)
         [bc.apply(A2, b) for bc in bcu]
         try:
@@ -611,10 +668,31 @@ if args.method == 'ipcs1':
             rm.save_div(False, u_)
         end()
 
+        if args.r :
+            begin("Rotation scheme pressure correction")
+            b = assemble(L3)
+            [bc.apply(A3, b) for bc in bcp]
+            if args.bc == 'nullspace':
+                null_space.orthogonalize(b)
+            try:
+                solver_p.solve(A3, p_mod.vector(), b)
+            except RuntimeError as inst:
+                rm.report_fail(args.name, dt, t)
+                exit()
+            save_pressure(p_mod)
+            end()
+
         # Move to next time step
         u1.assign(u0)
         u0.assign(u_)
-        p0.assign(p_)
+        if args.r :
+            p0.assign(p_mod)
+        else:
+            if args.bc == 'lagrange':
+                p0.assign(pQ)
+            else:
+                p0.assign(p_)
+
         t += dt
 
     info("Finished: Incremental pressure correction scheme n. 1")
