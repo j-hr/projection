@@ -8,17 +8,12 @@ import results
 
 # TODO authors, license
 
-# Reduce HDD usage
-# IFNEED option to set which steps to save (for example save only (t mod 0.05) == 0 )
-
 # Reorganize code
 # TODO clean results.py
 # FUTURE (adapting for different geometry) move IC, BC, ?mesh to problem file
 
 # Continue work
 # another projection methods (MiroK)
-# TODO ipcs0 (in progress)
-# TODO ipcs1 (in progress)
 # TODO rotational scheme
 # FUTURE ? SUPG stabilisation
 # FUTURE ? Adaptive time step
@@ -55,7 +50,6 @@ parameters["linear_algebra_backend"] = "PETSc"
 # Debugging ============================================================================================================
 # set_log_level(DEBUG)
 PETScOptions.set('mat_mumps_icntl_4', 0)  # 1-3 gives lots of information for mumps direct solvers
-
 
 # Resolve input arguments===============================================================================================
 print(sys.argv)
@@ -104,7 +98,8 @@ else:
         print('Chosen Krylov solvers.')
     elif args.solvers == 'direct':
         print('Chosen direct solvers.')
-
+if args.r:
+    rm.hasTentativePressure = True
 str_solver = args.solvers + ' ' + str(args.precision)
 options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': True}
 
@@ -205,9 +200,10 @@ rm.initialize(V, Q, mesh, "%sresults_%s_%s_%s_%s_factor%4.2f_%ds_%dms" %
               (args.name, args.type, args.method, args.bc, meshName, factor, ttime, dt * 1000), factor, PS, V, meshName, dt)
 
 
-def save_pressure(pressure):
+def save_pressure(is_tent, pressure):
     # normalize pressure
     p_average = assemble((1.0/volume) * pressure * dx)
+    # print('Average pressure: ', p_average)
     p_average_function = interpolate(Expression("p", p=p_average), Q)
     # print(p_average_function, pressure, pressure_Q)
     pressure.assign(pressure - p_average_function)
@@ -216,7 +212,9 @@ def save_pressure(pressure):
     p_out = assemble((1.0/area) * pressure * dsOut)
     # print(p_in, p_(0.0, 0.0, -10), p_(0.0, 5.0, -10.0), p_(5.0, 0.0, -10.0))
     p_diff = (p_out - p_in)/20.0  # 20.0 is a length of a pipe
-    rm.save_pressure(pressure, p_diff)
+    # plot(pressure, interactive=True)
+    # exit()
+    rm.save_pressure(is_tent, pressure, p_diff)
 
 
 # Common functions =====================================================================================================
@@ -232,11 +230,8 @@ def set_projection_solvers():
         solver_vel = LUSolver('mumps')
         solver_p = LUSolver('mumps')
     else:
-        solver_vel = KrylovSolver('gmres', 'hypre_euclid')   # nonsymetric > gmres
-        if args.bc == 'lagrange':
-            solver_p = KrylovSolver('gmres')          # nonsymmetric?
-        else:
-            solver_p = KrylovSolver('cg', args.prec)          # symmetric > CG TODO zkusit 'ilu' predpodminovac
+        solver_vel = KrylovSolver('gmres', 'ilu')   # nonsymetric > gmres  # IFNEED try hypre_amg
+        solver_p = KrylovSolver('cg', args.prec)          # symmetric > CG
         # solver_p = KrylovSolver('gmres', 'hypre_amg')     # NT this, with disabled setnullspace gives same oscilations
         options = {'absolute_tolerance': 10E-12, 'relative_tolerance': 10**(-args.precision),
                    'monitor_convergence': True, 'maximum_iterations': 500}
@@ -248,7 +243,7 @@ def set_projection_solvers():
         Q.dofmap().set(null_vec, 1.0)
         null_vec *= 1.0/null_vec.norm('l2')
         null_space = VectorSpaceBasis([null_vec])
-        as_backend_type(A0).set_nullspace(null_space)  # IMP maybe with ILU preconditioner?
+        as_backend_type(A1).set_nullspace(null_space)  # IMP maybe with ILU preconditioner?
         # solver_p.set_nullspace(null_space)  # IMP deprecated for KrylovSolver, not working for direct solver
 
     # apply global options for Krylov solvers
@@ -351,7 +346,7 @@ if args.method == "chorinExpl":
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
             exit()
-        save_pressure(p1)
+        save_pressure(False, p1)
         end()
 
         # Velocity correction
@@ -417,23 +412,23 @@ if args.method == 'ipcs0':
 
     # Tentative velocity, solve to u1
     U = 0.5*(u + u0)
-    F0 = (1./k)*inner(u - u0, v)*dx + inner(dot(grad(u0), u0), v)*dx\
+    F1 = (1./k)*inner(u - u0, v)*dx + inner(dot(grad(u0), u0), v)*dx\
         + nu*inner(grad(U), grad(v))*dx + inner(grad(p0), v)*dx\
         - inner(f, v)*dx
-    a0, L0 = system(F0)
-
-    # Projection, solve to p1
-    F1 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u1)*dx
     a1, L1 = system(F1)
 
-    # Finalize, solve to u1
-    F2 = (1./k)*inner(u - u1, v)*dx + inner(grad(p1 - p0), v)*dx
+    # Projection, solve to p1
+    F2 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u1)*dx
     a2, L2 = system(F2)
 
+    # Finalize, solve to u1
+    F3 = (1./k)*inner(u - u1, v)*dx + inner(grad(p1 - p0), v)*dx
+    a3, L3 = system(F3)
+
     # Assemble matrices
-    A0 = assemble(a0)
     A1 = assemble(a1)
     A2 = assemble(a2)
+    A3 = assemble(a3)
 
     set_projection_solvers()
 
@@ -449,10 +444,10 @@ if args.method == 'ipcs0':
 
         # Compute tentative velocity step
         begin("Computing tentative velocity")
-        b = assemble(L0)
-        [bc.apply(A0, b) for bc in bcu]
+        b = assemble(L1)
+        [bc.apply(A1, b) for bc in bcu]
         try:
-            solver_vel.solve(A0, u1.vector(), b)
+            solver_vel.solve(A1, u1.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
             exit()
@@ -464,22 +459,22 @@ if args.method == 'ipcs0':
         end()
 
         begin("Computing pressure correction")
-        b = assemble(L1)
-        [bc.apply(A1, b) for bc in bcp]
+        b = assemble(L2)
+        [bc.apply(A2, b) for bc in bcp]
         if args.bc == 'nullspace':
             null_space.orthogonalize(b)
         try:
-            solver_p.solve(A1, p1.vector(), b)
+            solver_p.solve(A2, p1.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
             exit()
-        save_pressure(p1)
+        save_pressure(False, p1)
         end()
 
-        b = assemble(L2)
-        [bc.apply(A2, b) for bc in bcu]
+        b = assemble(L3)
+        [bc.apply(A3, b) for bc in bcu]
         try:
-            solver_vel.solve(A2, u1.vector(), b)
+            solver_vel.solve(A3, u1.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
             exit()
@@ -538,7 +533,8 @@ if args.method == 'ipcs1':
         rm.save_vel(False, u0, 0.0)
         rm.save_vel(True, u0, 0.0)
 
-    u_ = Function(V)         # current velocity
+    u_ = Function(V)         # current tentative velocity
+    u_cor = Function(V)         # current corrected velocity
     if args.bc == 'lagrange':
         p_ = Function(QL)    # current pressure or pressure help function from rotation scheme
         pQ = Function(Q)     # auxiliary function for conversion between QL.sub(0) and Q
@@ -556,47 +552,49 @@ if args.method == 'ipcs1':
 
     nonlinearity = inner(dot(grad(U), U_), v)*dx
 
-    F0 = (1./k)*inner(u - u0, v)*dx + nonlinearity\
+    F1 = (1./k)*inner(u - u0, v)*dx + nonlinearity\
         + nu*inner(grad(U), grad(v))*dx + inner(grad(p0), v)*dx\
         - inner(f, v)*dx     # solve to u_
-    a0, L0 = system(F0)
+    a1, L1 = system(F1)
 
     if args.r :
         # Rotation scheme
         if args.bc == 'lagrange':
-            F1 = inner(grad(p), grad(q))*dx + (1./k)*q*div(u_)*dx + p*l*dx + q*r*dx
+            F2 = inner(grad(p), grad(q))*dx + (1./k)*q*div(u_)*dx + p*l*dx + q*r*dx
         else:
-            F1 = inner(grad(p), grad(q))*dx + (1./k)*q*div(u_)*dx
+            F2 = inner(grad(p), grad(q))*dx + (1./k)*q*div(u_)*dx
     else:
         # Projection, solve to p_
         if args.bc == 'lagrange':
-            F1 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx + p*l*dx + q*r*dx
+            F2 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx + p*l*dx + q*r*dx
         else:
-            F1 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
-    a1, L1 = system(F1)
+            F2 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
+    a2, L2 = system(F2)
 
     # Finalize, solve to u_
     if args.r :
         # Rotation scheme
-        F2 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_), v)*dx
+        F3 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_), v)*dx
     else:
         if args.bc == 'lagrange':
-            F2 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_.sub(0) - p0), v)*dx
+            F3 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_.sub(0) - p0), v)*dx
         else:
-            F2 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_ - p0), v)*dx
-    a2, L2 = system(F2)
+            F3 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_ - p0), v)*dx
+    a3, L3 = system(F3)
 
     if args.r :
         # Rotation scheme: modify pressure
-        F3 = (p - p0 - p_ + nu*div(u_))*q*dx
-        a3, L3 = system(F3)
+        F4 = (p - p0 - p_ + nu*div(u_))*q*dx
+        # TODO zkusit, jestli to nebude rychlejsi? nepocitat soustavu, ale p.assign(...), nutno project(div(u),Q) coz je pocitani podobne soustavy
+        # TODO zkusit v project zadat solver_type='lu' >> primy resic by mel byt efektivnejsi
+        a4, L4 = system(F4)
 
     # Assemble matrices
-    A0 = assemble(a0)
     A1 = assemble(a1)
     A2 = assemble(a2)
+    A3 = assemble(a3)
     if args.r :
-        A3 = assemble(a3)
+        A4 = assemble(a4)
 
     set_projection_solvers()
 
@@ -615,15 +613,15 @@ if args.method == 'ipcs1':
 
         # assemble matrix (ir depends on solution)
         temp = toc()
-        A0 = assemble(a0)
+        A1 = assemble(a1)
         print("Assembled A0 matrix. Time:%f" % (toc() - temp))
 
         # Compute tentative velocity step
         begin("Computing tentative velocity")
-        b = assemble(L0)
-        [bc.apply(A0, b) for bc in bcu]
+        b = assemble(L1)
+        [bc.apply(A1, b) for bc in bcu]
         try:
-            solver_vel.solve(A0, u_.vector(), b)
+            solver_vel.solve(A1, u_.vector(), b)
 
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
@@ -635,56 +633,66 @@ if args.method == 'ipcs1':
             rm.save_div(True, u_)
         end()
 
-        begin("Computing pressure")
-        b = assemble(L1)
-        [bc.apply(A1, b) for bc in bcp]
+        if args.r:
+            begin("Computing tentatice pressure")
+        else:
+            begin("Computing pressure")
+        b = assemble(L2)
+        [bc.apply(A2, b) for bc in bcp]
         if args.bc == 'nullspace':
             null_space.orthogonalize(b)
         try:
-            solver_p.solve(A1, p_.vector(), b)
+            solver_p.solve(A2, p_.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
             exit()
-        if not args.r:
+        if args.r:
+            foo = Function(Q)
+            foo.assign(p_+p0)
+            save_pressure(True, foo)
+        else:
             if args.bc == 'lagrange':
                 fa.assign(pQ, p_.sub(0))
-                save_pressure(pQ)
+                save_pressure(False, pQ)
             else:
-                save_pressure(p_)
+                save_pressure(False, p_)
+
         end()
 
         begin("Computing corrected velocity")
-        b = assemble(L2)
-        [bc.apply(A2, b) for bc in bcu]
+        b = assemble(L3)
+        # TODO zkusit bez BC a porovnat
+        [bc.apply(A3, b) for bc in bcu]
         try:
-            solver_vel.solve(A2, u_.vector(), b)
+            solver_vel.solve(A3, u_cor.vector(), b)
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
             exit()
-        rm.compute_err(False, u_, t)
-        rm.compute_div(False, u_)
+        rm.compute_err(False, u_cor, t)
+        rm.compute_div(False, u_cor)
         if rm.doSave:
-            rm.save_vel(False, u_, t)
-            rm.save_div(False, u_)
+            rm.save_vel(False, u_cor, t)
+            rm.save_div(False, u_cor)
         end()
 
         if args.r :
             begin("Rotation scheme pressure correction")
-            b = assemble(L3)
-            [bc.apply(A3, b) for bc in bcp]
-            if args.bc == 'nullspace':
-                null_space.orthogonalize(b)
+            b = assemble(L4)
             try:
-                solver_p.solve(A3, p_mod.vector(), b)
+                solver_p.solve(A4, p_mod.vector(), b)
             except RuntimeError as inst:
                 rm.report_fail(args.name, dt, t)
                 exit()
-            save_pressure(p_mod)
+            save_pressure(False, p_mod)
             end()
+
+        # plot(p_, title='tent')
+        # plot(p_mod, title='cor', interactive=True)
+        # exit()
 
         # Move to next time step
         u1.assign(u0)
-        u0.assign(u_)
+        u0.assign(u_cor)
         if args.r :
             p0.assign(p_mod)
         else:

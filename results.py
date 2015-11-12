@@ -21,6 +21,7 @@ class ResultsManager:
         self.doErrControl = None
         self.testErrControl = False
         self.hasTentativeVel = False
+        self.hasTentativePressure = False
         self.isSteadyFlow = None
 
         self.velocity_norm = None
@@ -52,14 +53,20 @@ class ResultsManager:
         self.second_err_u2 = []
         self.second_err_div2 = []
         self.second_err_p = []
+        self.second_err_p2 = []
         self.second_err_pg = []
+        self.second_err_pg2 = []
         self.div_u = []
         self.div_u2 = []
         self.p_err = []
+        self.p_err2 = []
         self.pg = []
+        self.pg2 = []
         self.pg_analytic = []
         self.pg_err = []
+        self.pg_err2 = []
         self.pg_err_abs = []
+        self.pg_err_abs2 = []
 
         # output files
         self.uFile = None
@@ -69,9 +76,13 @@ class ResultsManager:
         self.dFile = None
         self.d2File = None
         self.pFile = None
+        self.p2File = None
         self.pDiffFile = None
+        self.p2DiffFile = None
         self.pgFile = None
+        self.pg2File = None
         self.pgDiffFile = None
+        self.pg2DiffFile = None
 
     def initialize(self, velocity_space, pressure_space, mesh, dir_name, factor, partial_solution_space, solution_space,
                    mesh_name, dt):
@@ -161,6 +172,16 @@ class ResultsManager:
                 self.u2DiffFile.parameters['rewrite_function_mesh'] = False
             self.d2File = XDMFFile(mpi_comm_world(), self.str_dir_name + "/div_tent.xdmf")  # maybe just compute norm
             self.d2File.parameters['rewrite_function_mesh'] = False
+        if self.hasTentativePressure:
+            self.p2File = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_tent.xdmf")
+            self.p2File.parameters['rewrite_function_mesh'] = False
+            self.pg2File = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_tent_grad.xdmf")
+            self.pg2File.parameters['rewrite_function_mesh'] = False
+            if self.doSaveDiff:
+                self.p2DiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_tent_diff.xdmf")
+                self.p2DiffFile.parameters['rewrite_function_mesh'] = False
+                self.pg2DiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_tent_grad_diff.xdmf")
+                self.pg2DiffFile.parameters['rewrite_function_mesh'] = False
 
     def update_time(self, actual_time):
         self.actual_time = round(actual_time, 3)
@@ -193,14 +214,16 @@ class ResultsManager:
         print("Saved solution. Time: %f" % (toc() - tmp))
 
     # method for saving pressure
-    def save_pressure(self, pressure, computed_gradient):
+    def save_pressure(self, is_tent, pressure, computed_gradient):
         analytic_gradient = womersleyBC.analytic_pressure_grad(self.factor, self.actual_time)
         analytic_pressure = womersleyBC.analytic_pressure(self.factor, self.actual_time)
         if self.doSave:
-            self.pFile << pressure   # IMP DONT work
+            p_file = self.p2File if is_tent else self.pFile
+            p_file << pressure
+            p_file = self.pg2File if is_tent else self.pgFile
             pg = project((1.0 / self.pressure_gradient_norm) * grad(pressure), self.pgSpace)
             self.pgFunction.assign(pg)
-            self.pgFile << self.pgFunction
+            p_file << self.pgFunction
             if self.doSaveDiff:
                 sol_pg_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pressure_gradient_norm)
                 sol_pg = interpolate(sol_pg_expr, self.pgSpace)
@@ -210,21 +233,34 @@ class ResultsManager:
                 # plot(pressure - sol_p, interactive=True, title="diff")
                 # exit()
                 self.pFunction.assign(pressure-sol_p)
-                self.pDiffFile << self.pFunction
+                p_file = self.p2DiffFile if is_tent else self.pDiffFile
+                p_file << self.pFunction
                 self.pgFunction.assign(pg-sol_pg)
-                self.pgDiffFile << self.pgFunction
+                p_file = self.pg2DiffFile if is_tent else self.pgDiffFile
+                p_file << self.pgFunction
         p_solution_expr = analytic_pressure
         p_solution = interpolate(p_solution_expr, self.pSpace)
-        self.p_err.append(errornorm(p_solution, pressure, norm_type="l2", degree_rise=0))
-        self.pg.append(computed_gradient)
-        self.pg_analytic.append(analytic_gradient)
-        self.pg_err.append(computed_gradient-analytic_gradient)
-        self.pg_err_abs.append(abs(computed_gradient-analytic_gradient))
+        list = self.p_err2 if is_tent else self.p_err
+        list.append(errornorm(p_solution, pressure, norm_type="l2", degree_rise=0))
+        list = self.pg2 if is_tent else self.pg
+        list.append(computed_gradient)
+        if not is_tent:
+            self.pg_analytic.append(analytic_gradient)
+        list = self.pg_err2 if is_tent else self.pg_err
+        list.append(computed_gradient-analytic_gradient)
+        list = self.pg_err_abs2 if is_tent else self.pg_err_abs
+        list.append(abs(computed_gradient-analytic_gradient))
         if self.isWholeSecond:
-            N1 = len(self.pg_err)
-            N0 = N1 - self.stepsInSecond
-            self.second_err_pg.append(sum(self.pg_err_abs[N0:N1]) / self.stepsInSecond)
-            self.second_err_p.append(sum(self.p_err[N0:N1]) / self.stepsInSecond)
+            if is_tent:
+                N1 = len(self.p_err2)
+                N0 = N1 - self.stepsInSecond
+                self.second_err_pg2.append(sum(self.pg_err_abs2[N0:N1]) / self.stepsInSecond)
+                self.second_err_p2.append(sum(self.p_err2[N0:N1]) / self.stepsInSecond)
+            else:
+                N1 = len(self.p_err)
+                N0 = N1 - self.stepsInSecond
+                self.second_err_pg.append(sum(self.pg_err_abs[N0:N1]) / self.stepsInSecond)
+                self.second_err_p.append(sum(self.p_err[N0:N1]) / self.stepsInSecond)
 
     def report_fail(self, str_name, dt, t):
         print("Runtime error:", sys.exc_info()[1])
@@ -361,7 +397,7 @@ class ResultsManager:
 
             total_err_pg = sum(self.pg_err_abs)
             avg_err_pg = total_err_pg * dt / ttime
-            N1 = len(self.pg_err)
+            N1 = len(self.pg_err_abs)
             N0 = N1 - self.stepsInSecond
             last_cycle_err_pg = sum(self.pg_err_abs[N0:N1])*dt
 
@@ -369,7 +405,7 @@ class ResultsManager:
             avg_err_u2 = total_err_u2 / math.sqrt(len(self.time_list))
 
             # last_cycle = self.time_list[N0:N1]
-            # print("N0,N1: ",N0, N1 ," len: ",len(last_cycle), " list: ",last_cycle)
+            # print("N0,N1: ", N0, N1, " len: ",len(last_cycle), " list: ",last_cycle)
             last_cycle_err_u = math.sqrt(sum(self.err_u[N0:N1]) * dt)
             last_cycle_div = sum(self.div_u[N0:N1]) * dt
             last_cycle_err_p = sum(self.p_err[N0:N1]) * dt
@@ -395,18 +431,40 @@ class ResultsManager:
                 if self.testErrControl:
                     report_writer.writerow([str_name] + ["test_corrected_errornorm"] + [str_name + "_TCE"] + self.err_ut)
                 if self.hasTentativeVel:
-                    report_writer.writerow([str_name] + ["tentative_error"] + [str_name + "_TE"] + self.err_u2)
+                    report_writer.writerow([str_name] + ["tent_error"] + [str_name + "_TE"] + self.err_u2)
                     self.err_u2 = [i/self.factor for i in self.err_u2]
-                    report_writer.writerow([str_name] + ["tentative_error_scaled"] + [str_name + "_TEs"] + self.err_u2)
+                    report_writer.writerow([str_name] + ["tent_error_scaled"] + [str_name + "_TEs"] + self.err_u2)
                     if self.testErrControl:
-                        report_writer.writerow([str_name] + ["test_tentative_errornorm"] + [str_name + "_TTE"] + self.err_u2t)
+                        report_writer.writerow([str_name] + ["test_tent_errornorm"] + [str_name + "_TTE"] + self.err_u2t)
 
             report_writer.writerow([str_name] + ["divergence_corrected"] + [str_name + "_DC"] + self.div_u)
             if self.hasTentativeVel:
-                report_writer.writerow([str_name] + ["divergence_tentative"] + [str_name + "_DT"] + self.div_u2)
+                report_writer.writerow([str_name] + ["divergence_tent"] + [str_name + "_DT"] + self.div_u2)
             report_writer.writerow([str_name] + ["analytic_pressure_gradient"] + ["analytic"] + self.pg_analytic)
-            report_writer.writerow([str_name] + ["computed_pressure_gradient"] + [str_name + "_PG"] + self.pg)
+            if self.pg2:
+                report_writer.writerow([str_name] + ["computed_pressure_tent_gradient"] + [str_name + "_PTG"] + self.pg2)
+                pg2 = [i/self.factor for i in self.pg2]
+                report_writer.writerow([str_name] + ["scaled_pressure_tent_gradient"] + [str_name + "_PTGs"] + pg2)
+                self.pg2 = [i/self.pressure_gradient_norm for i in self.pg2]
+                report_writer.writerow([str_name] + ["normalized_pressure_tent_gradient"] + [str_name + "_PTGn"] + self.pg2)
+            if self.p_err2:
+                report_writer.writerow([str_name] + ["pressure_tent_error"] + [str_name + "_PTE"] + self.p_err2)
+                p_err2 = [i/self.factor for i in self.p_err2]
+                report_writer.writerow([str_name] + ["scaled_pressure_tent_error"] + [str_name + "_PTEs"] + p_err2)
+            if self.pg_err2:
+                report_writer.writerow([str_name] + ["pressure_tent_gradient_error"] + [str_name + "_PTGE"] + self.pg_err2)
+                p_diff_err2 = [i/self.factor for i in self.pg_err2]
+                report_writer.writerow([str_name] + ["scaled_pressure_tent_gradient_error"] + [str_name + "_PTGEs"] + p_diff_err2)
+                self.pg_err2 = [i/self.pressure_gradient_norm for i in self.pg_err2]
+                report_writer.writerow([str_name] + ["normalized_pressure_tent_gradient_error"] + [str_name + "_PGEn"] + self.pg_err2)
+            if self.pg_err_abs2:
+                report_writer.writerow([str_name] + ["pressure_tent_gradient_error_abs"] + [str_name + "_PTGEA"] + self.pg_err_abs2)
+                p_diff_err_abs2 = [i/self.factor for i in self.pg_err_abs2]
+                report_writer.writerow([str_name] + ["scaled_pressure_tent_gradient_error_abs"] + [str_name + "_PTGEAs"] + p_diff_err_abs2)
+                self.pg_err_abs2 = [i/self.pressure_gradient_norm for i in self.pg_err_abs2]
+                report_writer.writerow([str_name] + ["normalized_pressure_tent_gradient_error_abs"] + [str_name + "_PTGEAn"] + self.pg_err_abs2)
             report_writer.writerow([str_name] + ["pressure_error"] + [str_name + "_PE"] + self.p_err)
+            report_writer.writerow([str_name] + ["computed_pressure_gradient"] + [str_name + "_PG"] + self.pg)
             report_writer.writerow([str_name] + ["pressure_gradient_error"] + [str_name + "_PGE"] + self.pg_err)
             report_writer.writerow([str_name] + ["pressure_gradient_error_abs"] + [str_name + "_PGEA"] + self.pg_err_abs)
             p_diff_analytic = [i/self.factor for i in self.pg_analytic]
@@ -415,7 +473,7 @@ class ResultsManager:
             p_diff_err = [i/self.factor for i in self.pg_err]
             p_diff_err_abs = [i/self.factor for i in self.pg_err_abs]
             report_writer.writerow([str_name] + ["scaled_analytic_pressure_gradient"] + ["analytic_scaled"] + p_diff_analytic)
-            report_writer.writerow([str_name] + ["scaled_computed_pressure_gradient"] + [str_name + "_PGs"] + p_diff)
+            report_writer.writerow([str_name] + ["scaled_pressure_gradient"] + [str_name + "_PGs"] + p_diff)
             report_writer.writerow([str_name] + ["scaled_pressure_error"] + [str_name + "_PEs"] + p_err)
             report_writer.writerow([str_name] + ["scaled_pressure_gradient_error"] + [str_name + "_PGEs"] + p_diff_err)
             report_writer.writerow([str_name] + ["scaled_pressure_gradient_error_abs"] + [str_name + "_PGEAs"] + p_diff_err_abs)
@@ -424,7 +482,7 @@ class ResultsManager:
             self.pg_err = [i/self.pressure_gradient_norm for i in self.pg_err]
             self.pg_err_abs = [i/self.pressure_gradient_norm for i in self.pg_err_abs]
             report_writer.writerow([str_name] + ["normalized_analytic_pressure_gradient"] + ["analytic_normalized"] + self.pg_analytic)
-            report_writer.writerow([str_name] + ["normalized_computed_pressure_gradient"] + [str_name + "_PGn"] + self.pg)
+            report_writer.writerow([str_name] + ["normalized_pressure_gradient"] + [str_name + "_PGn"] + self.pg)
             report_writer.writerow([str_name] + ["normalized_pressure_gradient_error"] + [str_name + "_PGEn"] + self.pg_err)
             report_writer.writerow([str_name] + ["normalized_pressure_gradient_error_abs"] + [str_name + "_PGEAn"] + self.pg_err_abs)
 
@@ -437,19 +495,27 @@ class ResultsManager:
                 self.second_err_u = [i/self.factor for i in self.second_err_u]
                 report_writer.writerow([str_name] + ["corrected_error_scaled"] + self.second_err_u)
                 if self.hasTentativeVel:
-                    report_writer.writerow([str_name] + ["tentative_error"] + self.second_err_u2)
+                    report_writer.writerow([str_name] + ["tent_error"] + self.second_err_u2)
                     self.second_err_u2 = [i/self.factor for i in self.second_err_u2]
-                    report_writer.writerow([str_name] + ["tentative_error_scaled"] + self.second_err_u2)
+                    report_writer.writerow([str_name] + ["tent_error_scaled"] + self.second_err_u2)
 
             report_writer.writerow([str_name] + ["divergence_corrected"] + self.second_err_div)
             if self.hasTentativeVel:
-                report_writer.writerow([str_name] + ["divergence_tentative"] + self.second_err_div2)
+                report_writer.writerow([str_name] + ["divergence_tent"] + self.second_err_div2)
             report_writer.writerow([str_name] + ["pressure_error"] + self.second_err_p)
             self.second_err_p = [i/self.factor for i in self.second_err_p]
             report_writer.writerow([str_name] + ["pressure_error_scaled"] + self.second_err_p)
+            if self.second_err_p2:
+                report_writer.writerow([str_name] + ["pressure_tent_error"] + self.second_err_p2)
+                self.second_err_p2 = [i/self.factor for i in self.second_err_p2]
+                report_writer.writerow([str_name] + ["pressure_tent_error_scaled"] + self.second_err_p2)
             report_writer.writerow([str_name] + ["pressure_gradient_error"] + self.second_err_pg)
             self.second_err_pg = [i/self.factor for i in self.second_err_pg]
             report_writer.writerow([str_name] + ["pressure_gradient_error_scaled"] + self.second_err_pg)
+            if self.second_err_pg2:
+                report_writer.writerow([str_name] + ["pressure_tent_gradient_error"] + self.second_err_pg2)
+                self.second_err_pg2 = [i/self.factor for i in self.second_err_pg2]
+                report_writer.writerow([str_name] + ["pressure_tent_gradient_error_scaled"] + self.second_err_pg2)
 
         # report without header
         with open(self.str_dir_name + "/report.csv", 'w') as reportFile:
