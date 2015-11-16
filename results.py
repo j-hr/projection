@@ -489,59 +489,59 @@ class ResultsManager:
         # report error norm, norm of div, and pressure gradients averaged over seconds
         with open(self.str_dir_name + "/report_seconds.csv", 'w') as reportFile:
             report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-            report_writer.writerow(["name"] + ["time"] + self.second_list)
+            report_writer.writerow(["name"] + ["what"] + ["time"] + self.second_list)
             if self.doErrControl:
-                report_writer.writerow([str_name] + ["corrected_error"] + self.second_err_u)
+                report_writer.writerow([str_name] + ["corrected_error"] + [str_name + "_CE"] + self.second_err_u)
                 self.second_err_u = [i/self.factor for i in self.second_err_u]
-                report_writer.writerow([str_name] + ["corrected_error_scaled"] + self.second_err_u)
+                report_writer.writerow([str_name] + ["corrected_error_scaled"] + [str_name + "_CEs"] + self.second_err_u)
                 if self.hasTentativeVel:
-                    report_writer.writerow([str_name] + ["tent_error"] + self.second_err_u2)
+                    report_writer.writerow([str_name] + ["tent_error"] + [str_name + "_TE"] + self.second_err_u2)
                     self.second_err_u2 = [i/self.factor for i in self.second_err_u2]
-                    report_writer.writerow([str_name] + ["tent_error_scaled"] + self.second_err_u2)
+                    report_writer.writerow([str_name] + ["tent_error_scaled"] + [str_name + "_TEs"] + self.second_err_u2)
 
-            report_writer.writerow([str_name] + ["divergence_corrected"] + self.second_err_div)
+            report_writer.writerow([str_name] + ["divergence_corrected"] + [str_name + "_CD"] + self.second_err_div)
             if self.hasTentativeVel:
-                report_writer.writerow([str_name] + ["divergence_tent"] + self.second_err_div2)
-            report_writer.writerow([str_name] + ["pressure_error"] + self.second_err_p)
+                report_writer.writerow([str_name] + ["divergence_tent"] + [str_name + "_CT"] + self.second_err_div2)
+            report_writer.writerow([str_name] + ["pressure_error"] + [str_name + "_PE"] + self.second_err_p)
             self.second_err_p = [i/self.factor for i in self.second_err_p]
-            report_writer.writerow([str_name] + ["pressure_error_scaled"] + self.second_err_p)
+            report_writer.writerow([str_name] + ["pressure_error_scaled"] + [str_name + "_PEs"] + self.second_err_p)
             if self.second_err_p2:
-                report_writer.writerow([str_name] + ["pressure_tent_error"] + self.second_err_p2)
+                report_writer.writerow([str_name] + ["pressure_tent_error"] + [str_name + "_PTE"] + self.second_err_p2)
                 self.second_err_p2 = [i/self.factor for i in self.second_err_p2]
-                report_writer.writerow([str_name] + ["pressure_tent_error_scaled"] + self.second_err_p2)
-            report_writer.writerow([str_name] + ["pressure_gradient_error"] + self.second_err_pg)
+                report_writer.writerow([str_name] + ["pressure_tent_error_scaled"] + [str_name + "_PTEs"] + self.second_err_p2)
+            report_writer.writerow([str_name] + ["pressure_gradient_error"] + [str_name + "_PGE"] + self.second_err_pg)
             self.second_err_pg = [i/self.factor for i in self.second_err_pg]
-            report_writer.writerow([str_name] + ["pressure_gradient_error_scaled"] + self.second_err_pg)
+            report_writer.writerow([str_name] + ["pressure_gradient_error_scaled"] + [str_name + "_PGEs"] + self.second_err_pg)
             if self.second_err_pg2:
-                report_writer.writerow([str_name] + ["pressure_tent_gradient_error"] + self.second_err_pg2)
+                report_writer.writerow([str_name] + ["pressure_tent_gradient_error"] + [str_name + "_PTGE"] + self.second_err_pg2)
                 self.second_err_pg2 = [i/self.factor for i in self.second_err_pg2]
-                report_writer.writerow([str_name] + ["pressure_tent_gradient_error_scaled"] + self.second_err_pg2)
+                report_writer.writerow([str_name] + ["pressure_tent_gradient_error_scaled"] + [str_name + "_PTGEs"] + self.second_err_pg2)
 
         # report without header
         with open(self.str_dir_name + "/report.csv", 'w') as reportFile:
             report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
             report_writer.writerow(
-                ["pipe_test"] + [str_name] + [str_type] + [str_method] + [mesh_name] + [mesh] + [str_solver] +
-                [factor] + [ttime] + [dt] + [total - self.time_erc] + [self.time_erc] + [total_err_u] + [total_err_u2] +
-                [avg_err_u] + [avg_err_u2] + [last_cycle_err_u] + [last_cycle_err_u2] + [last_cycle_div] +
+                ["pipe_test"] + [str_name] + [str_type] + [str_method] + [mesh_name] + [str_solver] +
+                [factor] + [ttime] + [dt] + [total/3600.0] + [total - self.time_erc] + [self.time_erc] + [total_err_u] + [total_err_u2] +
+                [avg_err_u] + [avg_err_u2] + [last_cycle_err_u] + [last_cycle_err_u2] + [last_cycle_err_p] + [last_cycle_div] +
                 [last_cycle_div2] + [last_cycle_err_min] + [last_cycle_err_max] + [last_cycle_err_min2] +
-                [last_cycle_err_max2] + [avg_err_pg] + [last_cycle_err_pg])
+                [last_cycle_err_max2] + [avg_err_pg] + [last_cycle_err_pg] + [mesh])
 
         # report with header
         with open(self.str_dir_name + "/report_h.csv", 'w') as reportFile:
             report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
             report_writer.writerow(
-                ["problem"] + ["name"] + ["type"] + ["method"] + ["mesh_name"] + ["mesh"] + ["solver"] + ["factor"] +
-                ["time"] + ["dt"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"] +
+                ["problem"] + ["name"] + ["type"] + ["method"] + ["mesh_name"] + ["solver"] + ["factor"] +
+                ["time"] + ["dt"] + ["totalTimeHours"] + ["timeToSolve"] + ["timeToComputeErr"] + ["toterrVel"] + ["toterrVelTent"] +
                 ["avg_err_u"] + ["avg_err_u2"] + ["last_cycle_err_u"] + ["last_cycle_err_u2"] + ["last_cycle_err_p"] + ["last_cycle_div"] +
                 ["last_cycle_div2"] + ["last_cycle_err_min"] + ["last_cycle_err_max"] + ["last_cycle_err_min2"] +
-                ["last_cycle_err_max2"] + ["avg_err_pg"] + ["last_cycle_err_pg"])
+                ["last_cycle_err_max2"] + ["avg_err_pg"] + ["last_cycle_err_pg"] + ["mesh"])
             report_writer.writerow(
-                ["pipe_test"] + [str_name] + [str_type] + [str_method] + [mesh_name] + [mesh] + [str_solver] +
-                [factor] + [ttime] + [dt] + [total - self.time_erc] + [self.time_erc] + [total_err_u] + [total_err_u2] +
+                ["pipe_test"] + [str_name] + [str_type] + [str_method] + [mesh_name] + [str_solver] +
+                [factor] + [ttime] + [dt] + [total/3600.0] + [total - self.time_erc] + [self.time_erc] + [total_err_u] + [total_err_u2] +
                 [avg_err_u] + [avg_err_u2] + [last_cycle_err_u] + [last_cycle_err_u2] + [last_cycle_err_p] + [last_cycle_div] +
                 [last_cycle_div2] + [last_cycle_err_min] + [last_cycle_err_max] + [last_cycle_err_min2] +
-                [last_cycle_err_max2] + [avg_err_pg] + [last_cycle_err_pg])
+                [last_cycle_err_max2] + [avg_err_pg] + [last_cycle_err_pg] + [mesh])
 
         # create file showing all was done well
         f = open(str_name + "_factor%4.2f_step_%dms_OK.report" % (factor, dt * 1000), "w")

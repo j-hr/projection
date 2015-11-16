@@ -261,7 +261,6 @@ def set_projection_solvers():
 # Explicit Chorin method================================================================================================
 if args.method == "chorinExpl":
     info("Initialization of explicit Chorin method")
-    tic()
 
     # Boundary conditions
     bc0 = DirichletBC(V, noSlip, facet_function, 1)
@@ -376,7 +375,6 @@ if args.method == "chorinExpl":
 # viscosity term treated semi-explicitly (Crank-Nicholson)
 if args.method == 'ipcs0':
     info("Initialization of Incremental pressure correction scheme n. 0")
-    tic()
 
     # Boundary conditions
     bc0 = DirichletBC(V, noSlip, facet_function, 1)
@@ -497,7 +495,6 @@ if args.method == 'ipcs0':
 # viscosity term treated semi-explicitly (Crank-Nicholson)
 if args.method == 'ipcs1':
     info("Initialization of Incremental pressure correction scheme n. 1")
-    tic()
 
     # Boundary conditions
     bc0 = DirichletBC(V, noSlip, facet_function, 1)
@@ -634,7 +631,7 @@ if args.method == 'ipcs1':
         end()
 
         if args.r:
-            begin("Computing tentatice pressure")
+            begin("Computing tentative pressure")
         else:
             begin("Computing pressure")
         b = assemble(L2)
@@ -708,7 +705,6 @@ if args.method == 'ipcs1':
 # Direct method=========================================================================================================
 if args.method == "direct":
     info("Initialization of direct method")
-    tic()
 
     # Define function spaces (Taylor-Hood)
     W = MixedFunctionSpace([V, Q])
