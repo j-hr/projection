@@ -6,6 +6,7 @@ from dolfin import *
 import os, traceback, math, csv, sys
 import womersleyBC
 
+
 class ResultsManager:
     def __init__(self):
 
@@ -83,6 +84,21 @@ class ResultsManager:
         self.pg2File = None
         self.pgDiffFile = None
         self.pg2DiffFile = None
+        # Dictionaries with [file, filename]
+        self.fileDict = {'u': [self.uFile, 'velocity'],
+                         'p': [self.pFile, 'pressure'],
+                         'pg':[self.pgFile, 'pressure_grad'],
+                         'd': [self.dFile, 'divergence']}
+        self.fileDictTent = {'u2': [self.uFile, 'velocity_tent'],
+                             'd2': [self.dFile, 'divergence_tent']}
+        self.fileDictDiff = {'uD': [self.uDiffFile, 'velocity_diff'],
+                             'pD': [self.pDiffFile, 'pressure_diff'],
+                             'pgD': [self.pgDiffFile, 'pressure_grad_diff']}
+        self.fileDictTentDiff = {'u2D': [self.u2DiffFile, 'velocity_tent_diff']}
+        self.fileDictTentP = {'p2': [self.p2File, 'pressure_tent'],
+                              'pg2':[self.pg2File, 'pressure_grad_tent']}
+        self.fileDictTentPDiff = {'p2D': [self.p2DiffFile, 'pressure_tent_diff'],
+                                  'pg2D':[self.pg2DiffFile, 'pressure_grad_tent_diff']}
 
     def initialize(self, velocity_space, pressure_space, mesh, dir_name, factor, partial_solution_space, solution_space,
                    mesh_name, dt):
@@ -148,40 +164,19 @@ class ResultsManager:
 # Output control========================================================================================================
     def initialize_xdmf_files(self):
         print('  Initializing output files.')
-        self.uFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/velocity.xdmf")
-        # saves lots of space (for use with static mesh)
-        self.uFile.parameters['rewrite_function_mesh'] = False
         if self.doSaveDiff:
-            self.uDiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/vel_sol_diff.xdmf")
-            self.uDiffFile.parameters['rewrite_function_mesh'] = False
-            self.pgDiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_grad_diff.xdmf")
-            self.pgDiffFile.parameters['rewrite_function_mesh'] = False
-            self.pDiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_diff.xdmf")
-            self.pDiffFile.parameters['rewrite_function_mesh'] = False
-        self.dFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/divergence.xdmf")  # maybe just compute norm
-        self.dFile.parameters['rewrite_function_mesh'] = False
-        self.pFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure.xdmf")
-        self.pFile.parameters['rewrite_function_mesh'] = False
-        self.pgFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_grad.xdmf")
-        self.pgFile.parameters['rewrite_function_mesh'] = False
+            self.fileDict.update(self.fileDictDiff)
         if self.hasTentativeVel:
-            self.u2File = XDMFFile(mpi_comm_world(), self.str_dir_name + "/velocity_tent.xdmf")
-            self.u2File.parameters['rewrite_function_mesh'] = False
+            self.fileDict.update(self.fileDictTent)
             if self.doSaveDiff:
-                self.u2DiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/vel_sol_diff_tent.xdmf")
-                self.u2DiffFile.parameters['rewrite_function_mesh'] = False
-            self.d2File = XDMFFile(mpi_comm_world(), self.str_dir_name + "/div_tent.xdmf")  # maybe just compute norm
-            self.d2File.parameters['rewrite_function_mesh'] = False
+                self.fileDict.update(self.fileDictTentDiff)
         if self.hasTentativePressure:
-            self.p2File = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_tent.xdmf")
-            self.p2File.parameters['rewrite_function_mesh'] = False
-            self.pg2File = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_tent_grad.xdmf")
-            self.pg2File.parameters['rewrite_function_mesh'] = False
+            self.fileDict.update(self.fileDictTentP)
             if self.doSaveDiff:
-                self.p2DiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_tent_diff.xdmf")
-                self.p2DiffFile.parameters['rewrite_function_mesh'] = False
-                self.pg2DiffFile = XDMFFile(mpi_comm_world(), self.str_dir_name + "/pressure_tent_grad_diff.xdmf")
-                self.pg2DiffFile.parameters['rewrite_function_mesh'] = False
+                self.fileDict.update(self.fileDictTentPDiff)
+        for key, value in self.fileDict.iteritems():
+            value[0] = XDMFFile(mpi_comm_world(), self.str_dir_name + "/" + value[1] + ".xdmf")
+            value[0].parameters['rewrite_function_mesh'] = False  # saves lots of space (for use with static mesh)
 
     def update_time(self, actual_time):
         self.actual_time = round(actual_time, 3)
@@ -194,23 +189,20 @@ class ResultsManager:
 
     # method for saving divergence (ensuring, that it will be one time line in ParaView)
     def save_div(self, is_tent, field):
-        div_file = self.d2File if is_tent else self.dFile
         tmp = toc()
         self.divFunction.assign(project(div(field), self.D))
-        div_file << self.divFunction
+        self.fileDict['d2' if is_tent else 'd'][0] << self.divFunction
         print("Computed and saved divergence. Time: %f" % (toc() - tmp))
 
     # method for saving velocity (ensuring, that it will be one time line in ParaView)
     def save_vel(self, is_tent, field, t):
-        vel_file = self.u2File if is_tent else self.uFile
         tmp = toc()
         self.vel.assign(field)
-        vel_file << self.vel
+        self.fileDict['u2' if is_tent else 'u'][0] << self.vel
         if self.doSaveDiff:
-            vel_file = self.u2DiffFile if is_tent else self.uDiffFile
             sol = self.assemble_solution(t)
             self.vel.assign((1.0 / self.velocity_norm) * (field - sol))
-            vel_file << self.vel
+            self.fileDict['u2D' if is_tent else 'uD'][0] << self.vel
         print("Saved solution. Time: %f" % (toc() - tmp))
 
     # method for saving pressure
@@ -218,12 +210,10 @@ class ResultsManager:
         analytic_gradient = womersleyBC.analytic_pressure_grad(self.factor, self.actual_time)
         analytic_pressure = womersleyBC.analytic_pressure(self.factor, self.actual_time)
         if self.doSave:
-            p_file = self.p2File if is_tent else self.pFile
-            p_file << pressure
-            p_file = self.pg2File if is_tent else self.pgFile
+            self.fileDict['p2' if is_tent else 'p'][0] << pressure
             pg = project((1.0 / self.pressure_gradient_norm) * grad(pressure), self.pgSpace)
             self.pgFunction.assign(pg)
-            p_file << self.pgFunction
+            self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
             if self.doSaveDiff:
                 sol_pg_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pressure_gradient_norm)
                 sol_pg = interpolate(sol_pg_expr, self.pgSpace)
@@ -233,11 +223,9 @@ class ResultsManager:
                 # plot(pressure - sol_p, interactive=True, title="diff")
                 # exit()
                 self.pFunction.assign(pressure-sol_p)
-                p_file = self.p2DiffFile if is_tent else self.pDiffFile
-                p_file << self.pFunction
+                self.fileDict['p2D' if is_tent else 'pD'][0] << self.pFunction
                 self.pgFunction.assign(pg-sol_pg)
-                p_file = self.pg2DiffFile if is_tent else self.pgDiffFile
-                p_file << self.pgFunction
+                self.fileDict['pg2D' if is_tent else 'pgD'][0] << self.pgFunction
         p_solution_expr = analytic_pressure
         p_solution = interpolate(p_solution_expr, self.pSpace)
         list = self.p_err2 if is_tent else self.p_err
