@@ -26,7 +26,7 @@ class ResultsManager:
         self.isSteadyFlow = None
 
         self.velocity_norm = None
-        self.pressure_gradient_norm = None
+        self.pressure_gradient_norm = []
         self.solutionSpace = None
         self.factor = None
         self.solution = None
@@ -44,15 +44,17 @@ class ResultsManager:
 
         # lists
         self.time_list = []  # list of times, when error is  measured (used in report)
+        self.av_norm = []
+        self.ap_norm = []
         self.err_u = []
         self.err_u2 = []
         self.err_ut = []
         self.err_u2t = []
         self.second_list = []
         self.second_err_u = []
-        self.second_err_div = []
+        self.second_div = []
         self.second_err_u2 = []
-        self.second_err_div2 = []
+        self.second_div2 = []
         self.second_err_p = []
         self.second_err_p2 = []
         self.second_err_pg = []
@@ -68,6 +70,51 @@ class ResultsManager:
         self.pg_err2 = []
         self.pg_err_abs = []
         self.pg_err_abs2 = []
+        # dictionary of data lists {list, name, abbreviation, add scaled row to report}
+        # normalisation coefficients (time-independent) are added to some lists to be used in normalized data series
+        # norm lists (time-dependent normalisation coefficients) are added to some lists to be used in relative data
+        #  series (to remove natural pulsation of error due to change in volume flow rate)
+        # L2(0) means L2 difference of pressures taken with zero average
+        self.listDict = {
+            'u': {'list': self.err_u, 'name': 'corrected velocity L2 error', 'abrev': 'CE', 'scale': True,
+                  'relative': 'av_norm'},
+            'u2': {'list': self.err_u2, 'name': 'tentative velocity L2 error', 'abrev': 'TE', 'scale': True,
+                   'relative': 'av_norm'},
+            'u_test': {'list': self.err_ut, 'name': 'test corrected L2 velocity error', 'abrev': 'TCE', 'scale': True},
+            'u2test': {'list': self.err_u2t, 'name': 'test tentative L2 velocity error', 'abrev': 'TTE', 'scale': True},
+            'd': {'list': self.div_u, 'name': 'corrected velocity L2 divergence', 'abrev': 'DC', 'scale': True},
+            'd2': {'list': self.div_u2, 'name': 'tentative velocity L2 divergence', 'abrev': 'DT', 'scale': True},
+            'apg': {'list': self.pg_analytic, 'name': 'analytic pressure gradient', 'abrev': 'APG', 'scale': True,
+                    'norm': self.pressure_gradient_norm},
+            'av_norm': {'list': self.av_norm, 'name': 'analytic velocity norm', 'abrev': 'APN', 'scale': False},
+            'ap_norm': {'list': self.ap_norm, 'name': 'analytic pressure norm', 'abrev': 'APN', 'scale': False},
+            'p': {'list': self.p_err, 'name': 'pressure L2(0) error', 'abrev': 'PE', 'scale': True,
+                  'relative': 'ap_norm'},
+            'pg': {'list': self.pg, 'name': 'computed pressure gradient', 'abrev': 'PG', 'scale': True,
+                   'norm': self.pressure_gradient_norm},
+            'pgE': {'list': self.pg_err, 'name': 'computed pressure gradient error', 'abrev': 'PGE', 'scale': True,
+                    'norm': self.pressure_gradient_norm},
+            'pgEA': {'list': self.pg_err_abs, 'name': 'computed absolute pressure gradient error', 'abrev': 'PGEA',
+                     'scale': True, 'norm': self.pressure_gradient_norm},
+            'p2': {'list': self.p_err2, 'name': 'pressure tent L2(0) error', 'abrev': 'PTE', 'scale': True,
+                   'relative': 'ap_norm'},
+            'pg2': {'list': self.pg2, 'name': 'computed pressure tent gradient', 'abrev': 'PTG', 'scale': True,
+                    'norm': self.pressure_gradient_norm},
+            'pgE2': {'list': self.pg_err2, 'name': 'computed tent pressure tent gradient error', 'abrev': 'PTGE',
+                     'scale': True, 'norm': self.pressure_gradient_norm},
+            'pgEA2': {'list': self.pg_err_abs2, 'name': 'computed absolute pressure tent gradient error',
+                      'abrev': 'PTGEA', 'scale': True, 'norm': self.pressure_gradient_norm}
+            }
+        # dictionary of data lists for cycle-averaged values {list}
+        # use same keys as in list dict for corresponding values
+        self.secondListDict = {'u': self.second_err_u,
+                               'u2': self.second_err_u2,
+                               'd': self.second_div,
+                               'd2': self.second_div2,
+                               'p': self.second_err_p,
+                               'p2': self.second_err_p2,
+                               'pgE': self.second_err_pg,
+                               'pgE2': self.second_err_pg2}
 
         # output files
         self.uFile = None
@@ -117,7 +164,7 @@ class ResultsManager:
             self.pgFunction = Function(self.pgSpace)
             self.pFunction = Function(self.pSpace)
             self.initialize_xdmf_files()
-        self.pressure_gradient_norm = womersleyBC.average_analytic_pressure_grad(self.factor)
+        self.pressure_gradient_norm.append(womersleyBC.average_analytic_pressure_grad(self.factor))
         self.velocity_norm = womersleyBC.average_analytic_velocity(self.factor)
         print('Initializing error control')
         self.solutionSpace = solution_space
@@ -209,15 +256,17 @@ class ResultsManager:
     def save_pressure(self, is_tent, pressure, computed_gradient):
         analytic_gradient = womersleyBC.analytic_pressure_grad(self.factor, self.actual_time)
         analytic_pressure = womersleyBC.analytic_pressure(self.factor, self.actual_time)
+        sol_p = interpolate(analytic_pressure, self.pSpace)
+        if not is_tent:
+            self.listDict['ap_norm']['list'].append(norm(sol_p, norm_type='L2'))
         if self.doSave:
             self.fileDict['p2' if is_tent else 'p'][0] << pressure
-            pg = project((1.0 / self.pressure_gradient_norm) * grad(pressure), self.pgSpace)
+            pg = project((1.0 / self.pressure_gradient_norm[0]) * grad(pressure), self.pgSpace)
             self.pgFunction.assign(pg)
             self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
             if self.doSaveDiff:
-                sol_pg_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pressure_gradient_norm)
+                sol_pg_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pressure_gradient_norm[0])
                 sol_pg = interpolate(sol_pg_expr, self.pgSpace)
-                sol_p = interpolate(analytic_pressure, self.pSpace)
                 # plot(sol_p, title="sol")
                 # plot(pressure, title="p")
                 # plot(pressure - sol_p, interactive=True, title="diff")
@@ -228,16 +277,12 @@ class ResultsManager:
                 self.fileDict['pg2D' if is_tent else 'pgD'][0] << self.pgFunction
         p_solution_expr = analytic_pressure
         p_solution = interpolate(p_solution_expr, self.pSpace)
-        list = self.p_err2 if is_tent else self.p_err
-        list.append(errornorm(p_solution, pressure, norm_type="l2", degree_rise=0))
-        list = self.pg2 if is_tent else self.pg
-        list.append(computed_gradient)
+        self.listDict['p2' if is_tent else 'p']['list'].append(errornorm(p_solution, pressure, norm_type="l2", degree_rise=0))
+        self.listDict['pg2' if is_tent else 'pg']['list'].append(computed_gradient)
         if not is_tent:
-            self.pg_analytic.append(analytic_gradient)
-        list = self.pg_err2 if is_tent else self.pg_err
-        list.append(computed_gradient-analytic_gradient)
-        list = self.pg_err_abs2 if is_tent else self.pg_err_abs
-        list.append(abs(computed_gradient-analytic_gradient))
+            self.listDict['apg']['list'].append(analytic_gradient)
+        self.listDict['pgE2' if is_tent else 'pgE']['list'].append(computed_gradient-analytic_gradient)
+        self.listDict['pgEA2' if is_tent else 'pgEA']['list'].append(abs(computed_gradient-analytic_gradient))
         if self.isWholeSecond:
             if is_tent:
                 N1 = len(self.p_err2)
@@ -263,7 +308,7 @@ class ResultsManager:
         tmp = toc()
         div_list.append(norm(velocity, 'Hdiv0'))
         if self.isWholeSecond:
-            sec_div_list = self.second_err_div2 if isTent else self.second_err_div
+            sec_div_list = self.second_div2 if isTent else self.second_div
             N1 = len(div_list)
             N0 = N1 - self.stepsInSecond
             sec_div_list.append(sum(div_list[N0:N1]) / self.stepsInSecond)
@@ -337,9 +382,9 @@ class ResultsManager:
 
     def compute_err(self, is_tent, velocity, t):
         if self.doErrControl:
-            er_list = self.err_u2 if is_tent else self.err_u
+            er_list = self.listDict['u2' if is_tent else 'u']['list']
             if self.testErrControl:
-                er_list_test = self.err_u2t if is_tent else self.err_ut
+                er_list_test = self.listDict['u2test' if is_tent else 'u_test']['list']
             tmp = toc()
             if self.isSteadyFlow:
                 if self.testErrControl:
@@ -347,11 +392,13 @@ class ResultsManager:
                 er_list.append(assemble(inner(velocity - self.solution, velocity - self.solution) * dx))  # faster
             else:
                 sol = self.assemble_solution(t)
+                if not is_tent:
+                    self.listDict['av_norm']['list'].append(norm(sol, norm_type='L2'))
                 if self.testErrControl:
                     er_list_test.append(errornorm(velocity, sol, norm_type='l2', degree_rise=0))
-                error = assemble(inner(velocity - sol, velocity - sol) * dx)
+                error = assemble(inner(velocity - sol, velocity - sol) * dx)  # faster than errornorm
                 print("  Error in velocity = ", math.sqrt(error))
-                er_list.append(error)  # faster
+                er_list.append(error)
             if self.isWholeSecond:
                 sec_err_list = self.second_err_u2 if is_tent else self.second_err_u
                 N1 = len(er_list)
@@ -412,98 +459,38 @@ class ResultsManager:
         with open(self.str_dir_name + "/report_time_lines.csv", 'w') as reportFile:
             report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
             report_writer.writerow(["name"] + ["what"] + ["time"] + self.time_list)
-            if self.doErrControl:
-                report_writer.writerow([str_name] + ["corrected_error"] + [str_name + "_CE"] + self.err_u)
-                self.err_u = [i/self.factor for i in self.err_u]
-                report_writer.writerow([str_name] + ["corrected_error_scaled"] + [str_name + "_CEs"] + self.err_u)
-                if self.testErrControl:
-                    report_writer.writerow([str_name] + ["test_corrected_errornorm"] + [str_name + "_TCE"] + self.err_ut)
-                if self.hasTentativeVel:
-                    report_writer.writerow([str_name] + ["tent_error"] + [str_name + "_TE"] + self.err_u2)
-                    self.err_u2 = [i/self.factor for i in self.err_u2]
-                    report_writer.writerow([str_name] + ["tent_error_scaled"] + [str_name + "_TEs"] + self.err_u2)
-                    if self.testErrControl:
-                        report_writer.writerow([str_name] + ["test_tent_errornorm"] + [str_name + "_TTE"] + self.err_u2t)
-
-            report_writer.writerow([str_name] + ["divergence_corrected"] + [str_name + "_DC"] + self.div_u)
-            if self.hasTentativeVel:
-                report_writer.writerow([str_name] + ["divergence_tent"] + [str_name + "_DT"] + self.div_u2)
-            report_writer.writerow([str_name] + ["analytic_pressure_gradient"] + ["analytic"] + self.pg_analytic)
-            if self.pg2:
-                report_writer.writerow([str_name] + ["computed_pressure_tent_gradient"] + [str_name + "_PTG"] + self.pg2)
-                pg2 = [i/self.factor for i in self.pg2]
-                report_writer.writerow([str_name] + ["scaled_pressure_tent_gradient"] + [str_name + "_PTGs"] + pg2)
-                self.pg2 = [i/self.pressure_gradient_norm for i in self.pg2]
-                report_writer.writerow([str_name] + ["normalized_pressure_tent_gradient"] + [str_name + "_PTGn"] + self.pg2)
-            if self.p_err2:
-                report_writer.writerow([str_name] + ["pressure_tent_error"] + [str_name + "_PTE"] + self.p_err2)
-                p_err2 = [i/self.factor for i in self.p_err2]
-                report_writer.writerow([str_name] + ["scaled_pressure_tent_error"] + [str_name + "_PTEs"] + p_err2)
-            if self.pg_err2:
-                report_writer.writerow([str_name] + ["pressure_tent_gradient_error"] + [str_name + "_PTGE"] + self.pg_err2)
-                p_diff_err2 = [i/self.factor for i in self.pg_err2]
-                report_writer.writerow([str_name] + ["scaled_pressure_tent_gradient_error"] + [str_name + "_PTGEs"] + p_diff_err2)
-                self.pg_err2 = [i/self.pressure_gradient_norm for i in self.pg_err2]
-                report_writer.writerow([str_name] + ["normalized_pressure_tent_gradient_error"] + [str_name + "_PGEn"] + self.pg_err2)
-            if self.pg_err_abs2:
-                report_writer.writerow([str_name] + ["pressure_tent_gradient_error_abs"] + [str_name + "_PTGEA"] + self.pg_err_abs2)
-                p_diff_err_abs2 = [i/self.factor for i in self.pg_err_abs2]
-                report_writer.writerow([str_name] + ["scaled_pressure_tent_gradient_error_abs"] + [str_name + "_PTGEAs"] + p_diff_err_abs2)
-                self.pg_err_abs2 = [i/self.pressure_gradient_norm for i in self.pg_err_abs2]
-                report_writer.writerow([str_name] + ["normalized_pressure_tent_gradient_error_abs"] + [str_name + "_PTGEAn"] + self.pg_err_abs2)
-            report_writer.writerow([str_name] + ["pressure_error"] + [str_name + "_PE"] + self.p_err)
-            report_writer.writerow([str_name] + ["computed_pressure_gradient"] + [str_name + "_PG"] + self.pg)
-            report_writer.writerow([str_name] + ["pressure_gradient_error"] + [str_name + "_PGE"] + self.pg_err)
-            report_writer.writerow([str_name] + ["pressure_gradient_error_abs"] + [str_name + "_PGEA"] + self.pg_err_abs)
-            p_diff_analytic = [i/self.factor for i in self.pg_analytic]
-            p_err = [i/self.factor for i in self.p_err]
-            p_diff = [i/self.factor for i in self.pg]
-            p_diff_err = [i/self.factor for i in self.pg_err]
-            p_diff_err_abs = [i/self.factor for i in self.pg_err_abs]
-            report_writer.writerow([str_name] + ["scaled_analytic_pressure_gradient"] + ["analytic_scaled"] + p_diff_analytic)
-            report_writer.writerow([str_name] + ["scaled_pressure_gradient"] + [str_name + "_PGs"] + p_diff)
-            report_writer.writerow([str_name] + ["scaled_pressure_error"] + [str_name + "_PEs"] + p_err)
-            report_writer.writerow([str_name] + ["scaled_pressure_gradient_error"] + [str_name + "_PGEs"] + p_diff_err)
-            report_writer.writerow([str_name] + ["scaled_pressure_gradient_error_abs"] + [str_name + "_PGEAs"] + p_diff_err_abs)
-            self.pg_analytic = [i/self.pressure_gradient_norm for i in self.pg_analytic]
-            self.pg = [i/self.pressure_gradient_norm for i in self.pg]
-            self.pg_err = [i/self.pressure_gradient_norm for i in self.pg_err]
-            self.pg_err_abs = [i/self.pressure_gradient_norm for i in self.pg_err_abs]
-            report_writer.writerow([str_name] + ["normalized_analytic_pressure_gradient"] + ["analytic_normalized"] + self.pg_analytic)
-            report_writer.writerow([str_name] + ["normalized_pressure_gradient"] + [str_name + "_PGn"] + self.pg)
-            report_writer.writerow([str_name] + ["normalized_pressure_gradient_error"] + [str_name + "_PGEn"] + self.pg_err)
-            report_writer.writerow([str_name] + ["normalized_pressure_gradient_error_abs"] + [str_name + "_PGEAn"] + self.pg_err_abs)
+            for key in self.listDict:
+                l = self.listDict[key]
+                if l['list']:
+                    abrev = str_name + "_" + l['abrev']
+                    report_writer.writerow([str_name] + [l['name']] + [abrev] + l['list'])
+                    if l['scale']:
+                        temp_list = [i/self.factor for i in l['list']]
+                        report_writer.writerow([str_name] + ["scaled " + l['name']] + [abrev+"s"] + temp_list)
+                    if 'norm' in l:
+                        # print('  norm:'+l['norm'])
+                        temp_list = [i/l['norm'][0] for i in l['list']]
+                        report_writer.writerow([str_name] + ["normalized " + l['name']] + [abrev+"n"] + temp_list)
+                    if 'relative' in l:
+                        norm_list = self.listDict[l['relative']]['list']
+                        temp_list = [l['list'][i]/norm_list[i] for i in range(0, len(l['list']))]
+                        report_writer.writerow([str_name] + ["relative " + l['name']] + [abrev+"r"] + temp_list)
 
         # report error norm, norm of div, and pressure gradients averaged over seconds
         with open(self.str_dir_name + "/report_seconds.csv", 'w') as reportFile:
             report_writer = csv.writer(reportFile, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
             report_writer.writerow(["name"] + ["what"] + ["time"] + self.second_list)
-            if self.doErrControl:
-                report_writer.writerow([str_name] + ["corrected_error"] + [str_name + "_CE"] + self.second_err_u)
-                self.second_err_u = [i/self.factor for i in self.second_err_u]
-                report_writer.writerow([str_name] + ["corrected_error_scaled"] + [str_name + "_CEs"] + self.second_err_u)
-                if self.hasTentativeVel:
-                    report_writer.writerow([str_name] + ["tent_error"] + [str_name + "_TE"] + self.second_err_u2)
-                    self.second_err_u2 = [i/self.factor for i in self.second_err_u2]
-                    report_writer.writerow([str_name] + ["tent_error_scaled"] + [str_name + "_TEs"] + self.second_err_u2)
-
-            report_writer.writerow([str_name] + ["divergence_corrected"] + [str_name + "_CD"] + self.second_err_div)
-            if self.hasTentativeVel:
-                report_writer.writerow([str_name] + ["divergence_tent"] + [str_name + "_CT"] + self.second_err_div2)
-            report_writer.writerow([str_name] + ["pressure_error"] + [str_name + "_PE"] + self.second_err_p)
-            self.second_err_p = [i/self.factor for i in self.second_err_p]
-            report_writer.writerow([str_name] + ["pressure_error_scaled"] + [str_name + "_PEs"] + self.second_err_p)
-            if self.second_err_p2:
-                report_writer.writerow([str_name] + ["pressure_tent_error"] + [str_name + "_PTE"] + self.second_err_p2)
-                self.second_err_p2 = [i/self.factor for i in self.second_err_p2]
-                report_writer.writerow([str_name] + ["pressure_tent_error_scaled"] + [str_name + "_PTEs"] + self.second_err_p2)
-            report_writer.writerow([str_name] + ["pressure_gradient_error"] + [str_name + "_PGE"] + self.second_err_pg)
-            self.second_err_pg = [i/self.factor for i in self.second_err_pg]
-            report_writer.writerow([str_name] + ["pressure_gradient_error_scaled"] + [str_name + "_PGEs"] + self.second_err_pg)
-            if self.second_err_pg2:
-                report_writer.writerow([str_name] + ["pressure_tent_gradient_error"] + [str_name + "_PTGE"] + self.second_err_pg2)
-                self.second_err_pg2 = [i/self.factor for i in self.second_err_pg2]
-                report_writer.writerow([str_name] + ["pressure_tent_gradient_error_scaled"] + [str_name + "_PTGEs"] + self.second_err_pg2)
+            for key, value in self.secondListDict.iteritems():
+                l = self.listDict[key]
+                if value:
+                    abrev = str_name + "_" + l['abrev']
+                    report_writer.writerow([str_name, l['name'], abrev] + value)
+                    if l['scale']:
+                        temp_list = [i/self.factor for i in value]
+                        report_writer.writerow([str_name] + ["scaled " + l['name']] + [abrev+"s"] + temp_list)
+                    if 'norm' in l:
+                        temp_list = [i/l['norm'][0] for i in value]
+                        report_writer.writerow([str_name] + ["normalized " + l['name']] + [abrev+"n"] + temp_list)
 
         # report without header
         with open(self.str_dir_name + "/report.csv", 'w') as reportFile:

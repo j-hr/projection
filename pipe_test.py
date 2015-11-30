@@ -73,7 +73,8 @@ parser.add_argument('-s', '--solvers', help='Solvers', choices=['direct', 'krylo
 parser.add_argument('--prec', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu'],
                     default='hypre_amg')
 parser.add_argument('-p', '--precision', help='Krylov solver precision', type=int, default=5)
-parser.add_argument('-b', '--bc', help='Pressure boundary condition mode', choices=['outflow', 'nullspace', 'lagrange'],
+parser.add_argument('-b', '--bc', help='Pressure boundary condition mode', choices=['outflow', 'nullspace',
+                                                                                    'nullspace_s', 'lagrange'],
                     default='outflow')
 parser.add_argument('-n', '--name', default='test')
 parser.add_argument('-r', help='Use rotation scheme', action='store_true')
@@ -238,13 +239,15 @@ def set_projection_solvers():
 
     # Get the nullspace if there are no pressure boundary conditions
     foo = Function(Q)     # auxiliary vector for setting pressure nullspace
-    if args.bc == 'nullspace':
+    if args.bc in ['nullspace', 'nullspace_s']:
         null_vec = Vector(foo.vector())
         Q.dofmap().set(null_vec, 1.0)
         null_vec *= 1.0/null_vec.norm('l2')
         null_space = VectorSpaceBasis([null_vec])
-        as_backend_type(A1).set_nullspace(null_space)  # IMP maybe with ILU preconditioner?
-        # solver_p.set_nullspace(null_space)  # IMP deprecated for KrylovSolver, not working for direct solver
+        if args.bc == 'nullspace':
+            as_backend_type(A1).set_nullspace(null_space)
+        if args.bc == 'nullspace_s':
+            solver_p.set_nullspace(null_space)  # IMP deprecated for KrylovSolver, not working for direct solver
 
     # apply global options for Krylov solvers
     if args.solvers == 'krylov':
@@ -323,7 +326,7 @@ if args.method == "chorinExpl":
         # Compute tentative velocity step
         begin("Computing tentative velocity")
         b1 = assemble(L1)
-        [bc.apply(A1, b1) for bc in bcu]  # PYTHON syntax
+        [bc.apply(A1, b1) for bc in bcu]
         try:
             solver_vel.solve(A1, u1.vector(), b1)
         except RuntimeError as inst:
@@ -636,7 +639,7 @@ if args.method == 'ipcs1':
             begin("Computing pressure")
         b = assemble(L2)
         [bc.apply(A2, b) for bc in bcp]
-        if args.bc == 'nullspace':
+        if args.bc in ['nullspace', 'nullspace_s']:
             null_space.orthogonalize(b)
         try:
             solver_p.solve(A2, p_.vector(), b)
