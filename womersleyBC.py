@@ -33,6 +33,14 @@ def average_analytic_velocity(factor):
     return 1081.48 * factor
 
 
+def average_analytic_velocity_expr(factor):
+    return Expression(("0", "0", "factor*(1081.48-43.2592 * (x[0]*x[0]+x[1]*x[1]))"), factor=factor)
+
+
+def average_analytic_pressure(factor):
+    return 641.967*10.0*pi*R*R*factor
+
+
 class WomersleyProfile(Expression):
     def __init__(self, factor):
         self.t = 0
@@ -61,6 +69,11 @@ def analytic_pressure_grad(factor, t):
     return factor * p_lambda(t)
 
 
+def average_analytic_pressure_expr(factor):
+    gradient = -641.967 * factor
+    return Expression("grad*x[2]", grad=gradient)
+
+
 def analytic_pressure(factor, t):
     gradient = analytic_pressure_grad(factor, t)
-    return Expression("grad*x[2]", factor=factor, grad=gradient)
+    return Expression("grad*x[2]", grad=gradient)

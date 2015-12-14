@@ -7,8 +7,63 @@ import os, traceback, math, csv, sys
 import womersleyBC
 
 
-class ResultsManager:
+# noinspection PyStatementEffect
+class TimeControl:
     def __init__(self):
+        # watch is list [total_time, last_start, message_when_measured]
+        self.watches = {}
+        tic()
+
+    def init_watch(self, what, message, count_to_sum):
+        if what not in self.watches:
+            self.watches[what] = [0, 0, message, count_to_sum]
+
+    def start(self, what):
+        if what in self.watches:
+            self.watches[what][1] = toc()
+
+    def end(self, what):
+        watch = self.watches[what]
+        elapsed = toc() - watch[1]
+        watch[0] += elapsed
+        print(watch[2]+'. Time: %.4f Total: %.4f' % (elapsed, watch[0]))
+
+    def print_report(self):
+        total_time = toc()
+        print('Total time of %.0f s, (%.2f hours).' % (total_time, total_time/3600.0))
+        sorted = []
+        sum = 0
+        for value in self.watches.itervalues():
+            if value[3]:
+               sum += value[0]
+            if not sorted:
+                sorted.append(value)
+            else:
+                i = 0
+                l = len(sorted)
+                while i < l and value[0]<sorted[i][0]:
+                    i += 1
+                sorted.insert(i, value)
+        for value in sorted:
+            print('   %-40s: %12.2f s %5.1f %%' % (value[2], value[0], 100.0*value[0]/total_time))
+        print('   %-40s: %12.2f s %5.1f %%' % ('Measured', sum, 100.0*sum/total_time))
+        print('   %-40s: %12.2f s %5.1f %%' % ('Unmeasured', total_time-sum, 100.0*(total_time-sum)/total_time))
+
+
+class ResultsManager:
+    def __init__(self, time_control):
+        # from main
+        self.factor = None
+        self.tc = time_control
+        self.tc.init_watch('assembleSol', 'Assembled analytic solution', True)
+        self.tc.init_watch('analyticP', 'Analytic pressure', True)
+        self.tc.init_watch('saveP', 'Saved pressure', True)
+        self.tc.init_watch('errorP', 'Computed pressure error', True)
+        self.tc.init_watch('errorV', 'Computed velocity error', True)
+        self.tc.init_watch('errorVtest', 'Computed velocity error test', True)
+        self.tc.init_watch('div', 'Computed and saved divergence', True)
+        self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
+        self.tc.init_watch('saveVel', 'Saved velocity', True)
 
         # partial Bessel functions and coefficients
         self.bessel_parabolic = None
@@ -25,10 +80,10 @@ class ResultsManager:
         self.hasTentativePressure = False
         self.isSteadyFlow = None
 
-        self.velocity_norm = None
-        self.pressure_gradient_norm = []
+        self.vel_normalization_factor = []
+        self.pg_normalization_factor = []
+        self.p_normalization_factor = []
         self.solutionSpace = None
-        self.factor = None
         self.solution = None
         self.time_erc = 0  # total time spent on measuring error
         self.actual_time = None
@@ -36,7 +91,8 @@ class ResultsManager:
         self.N0 = 0
         self.N1 = 0
         self.stepsInSecond = None
-        self.last_analytic_velocity_norm = 0
+        self.last_analytic_velocity_norm_L2 = 0
+        self.last_analytic_velocity_norm_H1 = 0
         self.last_analytic_pressure_norm = 0
         self.vel = None
         self.D = None
@@ -48,69 +104,50 @@ class ResultsManager:
 
         # lists
         self.time_list = []  # list of times, when error is  measured (used in report)
-        self.av_norm = []
-        self.ap_norm = []
-        self.err_u = []
-        self.err_u2 = []
-        self.err_ut = []
-        self.err_u2t = []
         self.second_list = []
-        self.second_err_u = []
-        self.second_div = []
-        self.second_err_u2 = []
-        self.second_div2 = []
-        self.second_err_p = []
-        self.second_err_p2 = []
-        self.second_err_pg = []
-        self.second_err_pg2 = []
-        self.div_u = []
-        self.div_u2 = []
-        self.p_err = []
-        self.p_err2 = []
-        self.pg = []
-        self.pg2 = []
-        self.pg_analytic = []
-        self.pg_err = []
-        self.pg_err2 = []
-        self.pg_err_abs = []
-        self.pg_err_abs2 = []
         # dictionary of data lists {list, name, abbreviation, add scaled row to report}
         # normalisation coefficients (time-independent) are added to some lists to be used in normalized data series
+        #   coefs are equal to average of respective value of analytic solution
         # norm lists (time-dependent normalisation coefficients) are added to some lists to be used in relative data
         #  series (to remove natural pulsation of error due to change in volume flow rate)
         # slist - lists for cycle-averaged values
         # L2(0) means L2 difference of pressures taken with zero average
         self.listDict = {
-            'u': {'list': self.err_u, 'name': 'corrected velocity L2 error', 'abrev': 'CE', 'scale': True,
-                  'relative': 'av_norm', 'slist': self.second_err_u},
-            'u2': {'list': self.err_u2, 'name': 'tentative velocity L2 error', 'abrev': 'TE', 'scale': True,
-                   'relative': 'av_norm', 'slist': self.second_err_u2},
-            'u_test': {'list': self.err_ut, 'name': 'test corrected L2 velocity error', 'abrev': 'TCE', 'scale': True},
-            'u2test': {'list': self.err_u2t, 'name': 'test tentative L2 velocity error', 'abrev': 'TTE', 'scale': True},
-            'd': {'list': self.div_u, 'name': 'corrected velocity L2 divergence', 'abrev': 'DC', 'scale': True,
-                  'slist': self.second_div},
-            'd2': {'list': self.div_u2, 'name': 'tentative velocity L2 divergence', 'abrev': 'DT', 'scale': True,
-                   'slist': self.second_div2},
-            'apg': {'list': self.pg_analytic, 'name': 'analytic pressure gradient', 'abrev': 'APG', 'scale': True,
-                    'norm': self.pressure_gradient_norm},
-            'av_norm': {'list': self.av_norm, 'name': 'analytic velocity norm', 'abrev': 'APN', 'scale': False},
-            'ap_norm': {'list': self.ap_norm, 'name': 'analytic pressure norm', 'abrev': 'APN', 'scale': False},
-            'p': {'list': self.p_err, 'name': 'pressure L2(0) error', 'abrev': 'PE', 'scale': True,
-                  'relative': 'ap_norm', 'slist': self.second_err_p},
-            'pg': {'list': self.pg, 'name': 'computed pressure gradient', 'abrev': 'PG', 'scale': True,
-                   'norm': self.pressure_gradient_norm},
-            'pgE': {'list': self.pg_err, 'name': 'computed pressure gradient error', 'abrev': 'PGE', 'scale': True,
-                    'norm': self.pressure_gradient_norm, 'slist': self.second_err_pg},
-            'pgEA': {'list': self.pg_err_abs, 'name': 'computed absolute pressure gradient error', 'abrev': 'PGEA',
-                     'scale': True, 'norm': self.pressure_gradient_norm},
-            'p2': {'list': self.p_err2, 'name': 'pressure tent L2(0) error', 'abrev': 'PTE', 'scale': True,
-                   'relative': 'ap_norm', 'slist': self.second_err_p2},
-            'pg2': {'list': self.pg2, 'name': 'computed pressure tent gradient', 'abrev': 'PTG', 'scale': True,
-                    'norm': self.pressure_gradient_norm},
-            'pgE2': {'list': self.pg_err2, 'name': 'computed tent pressure tent gradient error', 'abrev': 'PTGE',
-                     'scale': True, 'norm': self.pressure_gradient_norm, 'slist': self.second_err_pg2},
-            'pgEA2': {'list': self.pg_err_abs2, 'name': 'computed absolute pressure tent gradient error',
-                      'abrev': 'PTGEA', 'scale': True, 'norm': self.pressure_gradient_norm}
+            'u_L2': {'list': [], 'name': 'corrected velocity L2 error', 'abrev': 'CE_L2', 'scale': True,
+                     'relative': 'av_norm_L2', 'slist': [], 'norm': self.vel_normalization_factor},
+            'u2L2': {'list': [], 'name': 'tentative velocity L2 error', 'abrev': 'TE_L2', 'scale': True,
+                     'relative': 'av_norm_L2', 'slist': [], 'norm': self.vel_normalization_factor},
+            'u_L2test': {'list': [], 'name': 'test corrected L2 velocity error', 'abrev': 'TCE_L2', 'scale': True},
+            'u2L2test': {'list': [], 'name': 'test tentative L2 velocity error', 'abrev': 'TTE_L2', 'scale': True},
+            'u_H1': {'list': [], 'name': 'corrected velocity H1 error', 'abrev': 'CE_H1', 'scale': True,
+                     'relative': 'av_norm_H1', 'slist': []},
+            'u2H1': {'list': [], 'name': 'tentative velocity H1 error', 'abrev': 'TE_H1', 'scale': True,
+                     'relative': 'av_norm_H1', 'slist': []},
+            'u_H1test': {'list': [], 'name': 'test corrected H1 velocity error', 'abrev': 'TCE_H1', 'scale': True},
+            'u2H1test': {'list': [], 'name': 'test tentative H1 velocity error', 'abrev': 'TTE_H1', 'scale': True},
+            'd': {'list': [], 'name': 'corrected velocity L2 divergence', 'abrev': 'DC', 'scale': True, 'slist': []},
+            'd2': {'list': [], 'name': 'tentative velocity L2 divergence', 'abrev': 'DT', 'scale': True, 'slist': []},
+            'apg': {'list': [], 'name': 'analytic pressure gradient', 'abrev': 'APG', 'scale': True,
+                    'norm': self.pg_normalization_factor},
+            'av_norm_L2': {'list': [], 'name': 'analytic velocity L2 norm', 'abrev': 'AVN_L2', 'scale': False},
+            'av_norm_H1': {'list': [], 'name': 'analytic velocity H1 norm', 'abrev': 'AVN_H1', 'scale': False},
+            'ap_norm': {'list': [], 'name': 'analytic pressure norm', 'abrev': 'APN', 'scale': False},
+            'p': {'list': [], 'name': 'pressure L2(0) error', 'abrev': 'PE', 'scale': True, 'slist': [],
+                  'norm': self.p_normalization_factor},
+            'pg': {'list': [], 'name': 'computed pressure gradient', 'abrev': 'PG', 'scale': True,
+                   'norm': self.pg_normalization_factor},
+            'pgE': {'list': [], 'name': 'computed pressure gradient error', 'abrev': 'PGE', 'scale': True,
+                    'norm': self.pg_normalization_factor, 'slist': []},
+            'pgEA': {'list': [], 'name': 'computed absolute pressure gradient error', 'abrev': 'PGEA',
+                     'scale': True, 'norm': self.pg_normalization_factor},
+            'p2': {'list': [], 'name': 'pressure tent L2(0) error', 'abrev': 'PTE', 'scale': True,
+                   'slist': [], 'norm': self.p_normalization_factor},
+            'pg2': {'list': [], 'name': 'computed pressure tent gradient', 'abrev': 'PTG', 'scale': True,
+                    'norm': self.pg_normalization_factor},
+            'pgE2': {'list': [], 'name': 'computed tent pressure tent gradient error', 'abrev': 'PTGE',
+                     'scale': True, 'norm': self.pg_normalization_factor, 'slist': []},
+            'pgEA2': {'list': [], 'name': 'computed absolute pressure tent gradient error',
+                      'abrev': 'PTGEA', 'scale': True, 'norm': self.pg_normalization_factor}
             }
 
         # output files
@@ -161,8 +198,13 @@ class ResultsManager:
             self.pgFunction = Function(self.pgSpace)
             self.pFunction = Function(self.pSpace)
             self.initialize_xdmf_files()
-        self.pressure_gradient_norm.append(womersleyBC.average_analytic_pressure_grad(self.factor))
-        self.velocity_norm = womersleyBC.average_analytic_velocity(self.factor)
+        self.pg_normalization_factor.append(womersleyBC.average_analytic_pressure_grad(self.factor))
+        self.p_normalization_factor.append(norm(
+            interpolate(womersleyBC.average_analytic_pressure_expr(self.factor), self.pSpace), norm_type='L2'))
+        self.vel_normalization_factor.append(norm(
+            interpolate(womersleyBC.average_analytic_velocity_expr(self.factor), velocity_space), norm_type='L2'))
+        print('Normalisation factors (vel, p, pg):', self.vel_normalization_factor[0], self.p_normalization_factor[0],
+              self.pg_normalization_factor[0])
         print('Initializing error control')
         self.solutionSpace = solution_space
         self.stepsInSecond = int(round(1.0 / float(dt)))
@@ -187,7 +229,7 @@ class ResultsManager:
             self.doSave = False
             print('Saving solution OFF.')
         else:
-            exit('Wrong parameter save_results, should be \"save\" o \"noSave\".')
+            exit('Wrong parameter save_results, should be \"save\", \"noSave\", or \"diff\".')
 
     def set_error_control_mode(self, option, str_type):
         if str_type == "steady":
@@ -236,38 +278,41 @@ class ResultsManager:
 
     # method for saving divergence (ensuring, that it will be one time line in ParaView)
     def save_div(self, is_tent, field):
-        tmp = toc()
+        self.tc.start('div')
         self.divFunction.assign(project(div(field), self.D))
+        # noinspection PyStatementEffect
         self.fileDict['d2' if is_tent else 'd'][0] << self.divFunction
-        print("Computed and saved divergence. Time: %f" % (toc() - tmp))
+        self.tc.end('div')
 
     # method for saving velocity (ensuring, that it will be one time line in ParaView)
     def save_vel(self, is_tent, field, t):
-        tmp = toc()
+        self.tc.start('saveVel')
         self.vel.assign(field)
         self.fileDict['u2' if is_tent else 'u'][0] << self.vel
         if self.doSaveDiff:
             sol = self.assemble_solution(t)
-            self.vel.assign((1.0 / self.velocity_norm) * (field - sol))
+            self.vel.assign((1.0 / self.vel_normalization_factor[0]) * (field - sol))
             self.fileDict['u2D' if is_tent else 'uD'][0] << self.vel
-        print("Saved solution. Time: %f" % (toc() - tmp))
+        self.tc.end('saveVel')
 
     # method for saving pressure
     def save_pressure(self, is_tent, pressure, computed_gradient):
-        tmp = toc()
+        self.tc.start('analyticP')
         analytic_gradient = womersleyBC.analytic_pressure_grad(self.factor, self.actual_time)
         analytic_pressure = womersleyBC.analytic_pressure(self.factor, self.actual_time)
         sol_p = interpolate(analytic_pressure, self.pSpace)
-        self.last_analytic_pressure_norm = norm(sol_p, norm_type='L2')
         if not is_tent:
+            self.last_analytic_pressure_norm = norm(sol_p, norm_type='L2')
             self.listDict['ap_norm']['list'].append(self.last_analytic_pressure_norm)
+        self.tc.end('analyticP')
+        self.tc.start('saveP')
         if self.doSave:
             self.fileDict['p2' if is_tent else 'p'][0] << pressure
-            pg = project((1.0 / self.pressure_gradient_norm[0]) * grad(pressure), self.pgSpace)
+            pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)
             self.pgFunction.assign(pg)
             self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
             if self.doSaveDiff:
-                sol_pg_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pressure_gradient_norm[0])
+                sol_pg_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pg_normalization_factor[0])
                 sol_pg = interpolate(sol_pg_expr, self.pgSpace)
                 # plot(sol_p, title="sol")
                 # plot(pressure, title="p")
@@ -277,11 +322,11 @@ class ResultsManager:
                 self.fileDict['p2D' if is_tent else 'pD'][0] << self.pFunction
                 self.pgFunction.assign(pg-sol_pg)
                 self.fileDict['pg2D' if is_tent else 'pgD'][0] << self.pgFunction
-        p_solution_expr = analytic_pressure
-        p_solution = interpolate(p_solution_expr, self.pSpace)
-        error = errornorm(p_solution, pressure, norm_type="l2", degree_rise=0)
+        self.tc.end('saveP')
+        self.tc.start('errorP')
+        error = errornorm(sol_p, pressure, norm_type="l2", degree_rise=0)
         self.listDict['p2' if is_tent else 'p']['list'].append(error)
-        print("Relative pressure error norm:", error/self.last_analytic_pressure_norm)
+        print("Normalized pressure error norm:", error/self.p_normalization_factor[0])
         self.listDict['pg2' if is_tent else 'pg']['list'].append(computed_gradient)
         if not is_tent:
             self.listDict['apg']['list'].append(analytic_gradient)
@@ -291,7 +336,7 @@ class ResultsManager:
             for key in (['pgE2', 'p2'] if is_tent else ['pgE', 'p']):
                 self.listDict[key]['slist'].append(
                     sqrt(sum([i*i for i in self.listDict[key]['list'][self.N0:self.N1]])/self.stepsInSecond))
-        print("Processed computed pressure. Time: %f" % (toc() - tmp))
+        self.tc.end('errorP')
 
     def report_fail(self, str_name, dt, t):
         print("Runtime error:", sys.exc_info()[1])
@@ -301,20 +346,19 @@ class ResultsManager:
         f.write(traceback.format_exc())
         f.close()
 
-    def compute_div(self, isTent, velocity):
-        div_list = self.div_u2 if isTent else self.div_u
-        tmp = toc()
+    def compute_div(self, is_tent, velocity):
+        self.tc.start('divNorm')
+        div_list = self.listDict['d2' if is_tent else 'd']['list']
         div_list.append(norm(velocity, 'Hdiv0'))
         if self.isWholeSecond:
-            self.listDict['d2' if isTent else 'd']['slist'].append(
+            self.listDict['d2' if is_tent else 'd']['slist'].append(
                 sum([i*i for i in div_list[self.N0:self.N1]])/self.stepsInSecond)
-
-        print("Computed norm of divergence. Time: %f" % (toc() - tmp))
+        self.tc.end('divNorm')
 
 # Error control=========================================================================================================
 
     def assemble_solution(self, t):  # returns Womersley sol for time t
-        tmp = toc()
+        self.tc.start('assembleSol')
         sol = Function(self.solutionSpace)
         dofs2 = self.solutionSpace.sub(2).dofmap().dofs()  # gives field of indices corresponding to z axis
         sol.assign(Constant(("0.0", "0.0", "0.0")))
@@ -322,7 +366,7 @@ class ResultsManager:
         for idx in range(8):  # add modes of Womersley sol
             sol.vector()[dofs2] += self.factor * cos(self.coefs_exp[idx] * pi * t) * self.bessel_real[idx].vector().array()
             sol.vector()[dofs2] += self.factor * -sin(self.coefs_exp[idx] * pi * t) * self.bessel_complex[idx].vector().array()
-        print("Assembled analytic solution. Time: %f" % (toc() - tmp))
+        self.tc.end('assembleSol')
         return sol
 
     def save_solution(self, mesh_name, file_type, factor, t_start, t_end, dt, PS, solution_space):
@@ -378,34 +422,58 @@ class ResultsManager:
 
     def compute_err(self, is_tent, velocity, t):
         if self.doErrControl:
-            er_list = self.listDict['u2' if is_tent else 'u']['list']
+            er_list_L2 = self.listDict['u2L2' if is_tent else 'u_L2']['list']
+            er_list_H1 = self.listDict['u2H1' if is_tent else 'u_H1']['list']
             if self.testErrControl:
-                er_list_test = self.listDict['u2test' if is_tent else 'u_test']['list']
-            tmp = toc()
+                er_list_test_H1 = self.listDict['u2H1test' if is_tent else 'u_H1test']['list']
+                er_list_test_L2 = self.listDict['u2L2test' if is_tent else 'u_L2test']['list']
             if self.isSteadyFlow:
                 if self.testErrControl:
-                    er_list_test.append(errornorm(velocity, self.solution, norm_type='l2', degree_rise=0))
-                er_list.append(assemble(inner(velocity - self.solution, velocity - self.solution) * dx))  # faster
+                    self.tc.start('errorVtest')
+                    er_list_test_L2.append(errornorm(velocity, self.solution, norm_type='L2', degree_rise=0))
+                    er_list_test_H1.append(errornorm(velocity, self.solution, norm_type='H1', degree_rise=0))
+                    self.tc.end('errorVtest')
+                self.tc.start('errorV')
+                er_list_L2.append(assemble(inner(velocity - self.solution, velocity - self.solution) * dx))  # faster
+                self.tc.end('errorV')
             else:
                 sol = self.assemble_solution(t)
-                self.last_analytic_velocity_norm = norm(sol, norm_type='L2')
+                self.last_analytic_velocity_norm_L2 = norm(sol, norm_type='L2')  # NT used redundantly twice per step
+                self.last_analytic_velocity_norm_H1 = norm(sol, norm_type='H1')  # NT used redundantly twice per step
                 if not is_tent:
-                    self.listDict['av_norm']['list'].append(self.last_analytic_velocity_norm)
+                    self.listDict['av_norm_L2']['list'].append(self.last_analytic_velocity_norm_L2)
+                    self.listDict['av_norm_H1']['list'].append(self.last_analytic_velocity_norm_H1)
                 if self.testErrControl:
-                    er_list_test.append(errornorm(velocity, sol, norm_type='l2', degree_rise=0))
-                error = sqrt(assemble(inner(velocity - sol, velocity - sol) * dx))  # faster than errornorm
-                print("  Relative error in velocity = ", error/self.last_analytic_velocity_norm)
-                er_list.append(error)
+                    self.tc.start('errorVtest')
+                    er_list_test_L2.append(errornorm(velocity, sol, norm_type='L2', degree_rise=0))
+                    er_list_test_H1.append(errornorm(velocity, sol, norm_type='H1', degree_rise=0))
+                    self.tc.end('errorVtest')
+                self.tc.start('errorV')
+                errorL2_sq = assemble(inner(velocity - sol, velocity - sol) * dx)  # faster than errornorm
+                errorH1seminorm_sq = assemble(inner(grad(velocity - sol), grad(velocity - sol)) * dx)  # faster than errornorm
+                print('  H1 seminorm error:', sqrt(errorH1seminorm_sq))
+                errorL2 = sqrt(errorL2_sq)
+                errorH1 = sqrt(errorL2_sq + errorH1seminorm_sq)
+                print("  Relative L2 error in velocity = ", errorL2/self.last_analytic_velocity_norm_L2)
+                print("  Relative H1 error in velocity = ", errorH1/self.last_analytic_velocity_norm_H1)
+                er_list_L2.append(errorL2)
+                er_list_H1.append(errorH1)
+                self.tc.end('errorV')
             if self.isWholeSecond:
-                self.listDict['u2' if is_tent else 'u']['slist'].append(
-                    math.sqrt(sum([i*i for i in er_list[self.N0:self.N1]])/self.stepsInSecond))
-            terc = toc() - tmp
-            self.time_erc += terc
-            print("Computed errornorm. Time: %f, Total: %f" % (terc, self.time_erc))
+                self.listDict['u2L2' if is_tent else 'u_L2']['slist'].append(
+                    math.sqrt(sum([i*i for i in er_list_L2[self.N0:self.N1]])/self.stepsInSecond))
+                self.listDict['u2H1' if is_tent else 'u_H1']['slist'].append(
+                    math.sqrt(sum([i*i for i in er_list_H1[self.N0:self.N1]])/self.stepsInSecond))
 
 # Reports ==============================================================================================================
     def report(self, dt, ttime, str_name, str_type, str_method, mesh_name, mesh, factor, str_solver):
         total = toc()
+
+        # compare errors measured by assemble and errornorm
+        if self.testErrControl:
+            for e in [[self.listDict['u_L2']['list'], self.listDict['u_L2test']['list'], 'L2'],
+                      [self.listDict['u_H1']['list'], self.listDict['u_H1test']['list'], 'H1']]:
+                print('test ', e[2], sum([abs(e[0][i]-e[1][i]) for i in range(len(self.err_ut))]))
 
         # report error norm, norm of div, and pressure gradients for individual time steps
         with open(self.str_dir_name + "/report_time_lines.csv", 'w') as reportFile:
@@ -445,6 +513,7 @@ class ResultsManager:
                         report_writer.writerow([str_name] + ["scaled " + l['name']] + [abrev+"s"] + temp_list)
                     if 'norm' in l:
                         temp_list = [i/l['norm'][0] for i in value]
+                        l['normalized_list_sec'] = temp_list
                         report_writer.writerow([str_name] + ["normalized " + l['name']] + [abrev+"n"] + temp_list)
                     if 'relative_list' in l:
                         temp_list = []
@@ -461,13 +530,17 @@ class ResultsManager:
                      "totalTimeHours", "timeToSolve", "timeToComputeErr"]
         data_row = ["pipe_test", str_name, str_type, str_method, mesh_name, str_solver, factor, ttime, dt, total/3600.0,
                     total - self.time_erc, self.time_erc]
-        for key in ['u', 'p', 'u2', 'p2', 'pgE', 'pgE2', 'd', 'd2']:
+        for key in ['u_L2', 'u_H1', 'p', 'u2L2', 'u2H1', 'p2', 'pgE', 'pgE2', 'd', 'd2']:
             l = self.listDict[key]
             header_row += ['last_cycle_'+l['abrev']]
             data_row += [l['slist'][-1]] if l['slist'] else [0]
             if 'relative_list_sec' in l:
                 header_row += ['last_cycle_'+l['abrev']+'r']
                 data_row += [l['relative_list_sec'][-1]]
+            elif key in ['p', 'p2']:
+                header_row += ['last_cycle_'+l['abrev']+'n']
+                data_row += [l['normalized_list_sec'][-1]]
+
         header_row += ["mesh"]
         data_row += [mesh]
 
