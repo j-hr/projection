@@ -5,6 +5,7 @@ import argparse
 
 import womersleyBC
 import results
+import problem as prb
 
 # TODO authors, license
 
@@ -72,7 +73,7 @@ parser.add_argument('-S', '--save', help='Save solution mode', choices=['doSave'
 parser.add_argument('-s', '--solvers', help='Solvers', choices=['direct', 'krylov'], default='krylov')
 parser.add_argument('--prec', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu'],
                     default='hypre_amg')
-parser.add_argument('-p', '--precision', help='Krylov solver precision', type=int, default=5)
+parser.add_argument('-p', '--precision', help='Krylov solver precision', type=int, default=6)
 parser.add_argument('-b', '--bc', help='Pressure boundary condition mode', choices=['outflow', 'nullspace',
                                                                                     'nullspace_s', 'lagrange'],
                     default='outflow')
@@ -83,15 +84,15 @@ parser.add_argument('-B', help='Use no BC in correction step', action='store_tru
 args = parser.parse_args()
 print(args)
 
+problem = prb.Problem('pipe_womersley', args)
+
+rm = results.ResultsManager(problem, tc)
 print("Problem type: " + args.type)
-rm = results.ResultsManager(tc)
-rm.set_save_mode(args.save)
-rm.set_error_control_mode(args.error, args.type)
 print("Method:       " + args.method)
-hasTentativeVel = False
 if args.method in ['chorinExpl', 'ipcs0', 'ipcs1']:
-    hasTentativeVel = True
-    rm.hasTentativeVel = True
+    problem.d()['hasTentativeVel'] = True
+else:
+    problem.d()['hasTentativeVel'] = False
 if args.method == 'direct':
     if args.solver != 'default':
         exit('Parameter solvers should be \'default\' when using direct method.')
@@ -100,9 +101,10 @@ else:
         print('Chosen Krylov solvers.')
     elif args.solvers == 'direct':
         print('Chosen direct solvers.')
+useRotationScheme = False
 if args.r:
-    rm.hasTentativePressure = True
-str_solver = args.solvers + ' ' + str(args.precision)
+    useRotationScheme = True
+
 options = {'absolute_tolerance': 1e-25, 'relative_tolerance': 1e-12, 'monitor_convergence': True}
 
 # Set parameter values
@@ -114,7 +116,8 @@ print("Velocity scale factor = %4.2f" % factor)
 reynolds = 728.761 * factor
 print("Computing with Re = %f" % reynolds)
 
-if args.method == 'chorinExpl' and args.bc != 'outflow': exit('This combination is not coded properly.')
+if args.method == 'chorinExpl' and args.bc != 'outflow':
+    exit('This combination is not coded properly.')
 
 # ======================================================================================================================
 # Import gmsh mesh
@@ -124,6 +127,8 @@ cell_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_physical_r
 facet_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_facet_region.xml")
 dsIn = Measure("ds", subdomain_id=2, subdomain_data=facet_function)
 dsOut = Measure("ds", subdomain_id=3, subdomain_data=facet_function)
+dsWall = Measure("ds", subdomain_id=1, subdomain_data=facet_function)
+rm.dsWall = dsWall
 print("Mesh name: ", meshName, "    ", mesh)
 print("Mesh norm max: ", mesh.hmax())
 print("Mesh norm min: ", mesh.hmin())
@@ -202,13 +207,16 @@ rm.initialize(V, Q, mesh, "%sresults_%s_%s_%s_%s_factor%4.2f_%ds_%dms" %
               (args.name, args.type, args.method, args.bc, meshName, factor, ttime, dt * 1000), factor, PS, V, meshName, dt)
 
 
-def save_pressure(is_tent, pressure):
-    # normalize pressure (substract average)
+def averaging_pressure(pressure):
+    # averaging pressure (substract average)
     p_average = assemble((1.0/volume) * pressure * dx)
     # print('Average pressure: ', p_average)
     p_average_function = interpolate(Expression("p", p=p_average), Q)
     # print(p_average_function, pressure, pressure_Q)
     pressure.assign(pressure - p_average_function)
+
+
+def save_pressure(is_tent, pressure):
     # Report pressure gradient
     p_in = assemble((1.0/area) * pressure * dsIn)
     p_out = assemble((1.0/area) * pressure * dsOut)
@@ -234,13 +242,13 @@ def set_projection_solvers():
     if args.solvers == 'direct':
         solver_vel = LUSolver('mumps')
         solver_p = LUSolver('mumps')
-        if args.r:
+        if useRotationScheme:
             solver_rot = LUSolver('mumps')
     else:
         solver_vel = KrylovSolver('gmres', 'ilu')   # nonsymetric > gmres  # IFNEED try hypre_amg
         solver_p = KrylovSolver('cg', args.prec)          # symmetric > CG
         # solver_p = KrylovSolver('gmres', 'hypre_amg')     # NT this, with disabled setnullspace gives same oscilations
-        if args.r:
+        if useRotationScheme:
             solver_rot = KrylovSolver('cg', args.prec)
 
         options = {'absolute_tolerance': 10E-12, 'relative_tolerance': 10**(-args.precision),
@@ -262,7 +270,7 @@ def set_projection_solvers():
 
     # apply global options for Krylov solvers
     if args.solvers == 'krylov':
-        for solver in [solver_vel, solver_p, solver_rot] if args.r else [solver_vel, solver_p]:
+        for solver in [solver_vel, solver_p, solver_rot] if useRotationScheme else [solver_vel, solver_p]:
             for key, value in options.items():
                 try:
                     solver.parameters[key] = value
@@ -359,6 +367,7 @@ if args.method == "chorinExpl":
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
             exit()
+        averaging_pressure(p1)
         save_pressure(False, p1)
         end()
 
@@ -480,6 +489,7 @@ if args.method == 'ipcs0':
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
             exit()
+        averaging_pressure(p1)
         save_pressure(False, p1)
         end()
 
@@ -509,6 +519,7 @@ if args.method == 'ipcs0':
 # viscosity term treated semi-explicitly (Crank-Nicholson)
 if args.method == 'ipcs1':
     info("Initialization of Incremental pressure correction scheme n. 1")
+    n = FacetNormal(mesh)
 
     # Boundary conditions
     bc0 = DirichletBC(V, noSlip, facet_function, 1)
@@ -568,7 +579,7 @@ if args.method == 'ipcs1':
         - inner(f, v)*dx     # solve to u_
     a1, L1 = system(F1)
 
-    if args.r:
+    if useRotationScheme:
         # Rotation scheme
         if args.bc == 'lagrange':
             F2 = inner(grad(pQL), grad(qQL))*dx + (1./k)*qQL*div(u_)*dx + pQL*lQL*dx + qQL*rQL*dx
@@ -583,7 +594,7 @@ if args.method == 'ipcs1':
     a2, L2 = system(F2)
 
     # Finalize, solve to u_
-    if args.r:
+    if useRotationScheme:
         # Rotation scheme
         if args.bc == 'lagrange':
             F3 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_QL.sub(0)), v)*dx
@@ -596,7 +607,7 @@ if args.method == 'ipcs1':
             F3 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_ - p0), v)*dx
     a3, L3 = system(F3)
 
-    if args.r:
+    if useRotationScheme:
         # Rotation scheme: modify pressure
         if args.bc == 'lagrange':
             pr = TrialFunction(Q)
@@ -613,7 +624,7 @@ if args.method == 'ipcs1':
     A1 = assemble(a1)
     A2 = assemble(a2)
     A3 = assemble(a3)
-    if args.r:
+    if useRotationScheme:
         A4 = assemble(a4)
     tc.end('assembleMatrices')
 
@@ -651,7 +662,7 @@ if args.method == 'ipcs1':
             solver_vel.solve(A1, u_.vector(), b)
             tc.end('solve 1')
         except RuntimeError as inst:
-            rm.report_fail(args.name, dt, t)
+            rm.report_fail(t)
             exit()
         rm.compute_err(True, u_, t)
         rm.compute_div(True, u_)
@@ -660,7 +671,7 @@ if args.method == 'ipcs1':
             rm.save_div(True, u_)
         end()
 
-        if args.r:
+        if useRotationScheme:
             begin("Computing tentative pressure")
         else:
             begin("Computing pressure")
@@ -683,19 +694,22 @@ if args.method == 'ipcs1':
         except RuntimeError as inst:
             rm.report_fail(args.name, dt, t)
             exit()
-        if args.r:
+        if useRotationScheme:
             foo = Function(Q)
             if args.bc == 'lagrange':
                 fa.assign(pQ, p_QL.sub(0))
                 foo.assign(pQ + p0)
             else:
                 foo.assign(p_+p0)
+            averaging_pressure(foo)
             save_pressure(True, foo)
         else:
             if args.bc == 'lagrange':
                 fa.assign(pQ, p_QL.sub(0))
+                averaging_pressure(pQ)
                 save_pressure(False, pQ)
             else:
+                averaging_pressure(p_)
                 save_pressure(False, p_)
 
         end()
@@ -722,7 +736,7 @@ if args.method == 'ipcs1':
             rm.save_div(False, u_cor)
         end()
 
-        if args.r:
+        if useRotationScheme:
             begin("Rotation scheme pressure correction")
             tc.start('rhs')
             b = assemble(L4)
@@ -734,6 +748,7 @@ if args.method == 'ipcs1':
             except RuntimeError as inst:
                 rm.report_fail(args.name, dt, t)
                 exit()
+            averaging_pressure(p_mod)
             save_pressure(False, p_mod)
             end()
 
@@ -741,10 +756,13 @@ if args.method == 'ipcs1':
         # plot(p_mod, title='cor', interactive=True)
         # exit()
 
+        # compute force on wall
+        rm.compute_force(u_cor, p_mod if useRotationScheme else (pQ if args.bc == 'lagrange' else p_), n, t)  # NT clean somehow?
+
         # Move to next time step
         u1.assign(u0)
         u0.assign(u_cor)
-        if args.r:
+        if useRotationScheme:
             p0.assign(p_mod)
         else:
             if args.bc == 'lagrange':
@@ -841,6 +859,7 @@ if args.method == "direct":
         if rm.doSave:
             rm.save_vel(False, velSp, t)
             rm.save_div(False, u)
+        averaging_pressure(p1)
         save_pressure(False, p1)
         rm.compute_div(False, u)
         rm.compute_err(False, u, t)
@@ -852,5 +871,4 @@ if args.method == "direct":
     info("Finished: direct method")
 
 # Report
-rm.report(dt, ttime, args.name, args.type, args.method, meshName, mesh, factor, str_solver)  # TODO clean arguments
-tc.print_report()
+rm.report()
