@@ -555,43 +555,45 @@ class ResultsManager:
         # report error norm, norm of div, and pressure gradients for individual time steps
         with open(self.str_dir_name + "/report_time_lines.csv", 'w') as reportFile:
             report_writer = csv.writer(reportFile, delimiter=';', escapechar='\\', quoting=csv.QUOTE_NONE)
-            report_writer.writerow(["name", 'metadata', "what", "time"] + self.time_list)
+            # report_writer.writerow(self.problem.get_metadata_to_save())
+            report_writer.writerow(["name", "what", "time"] + self.time_list)
             for key in self.listDict:
                 l = self.listDict[key]
                 if l['list']:
                     abrev = l['abrev']
-                    report_writer.writerow([pd['name']] + self.problem.get_metadata_to_save() + [l['name']] + [abrev] + l['list'])
+                    report_writer.writerow([pd['name'], l['name'], abrev] + l['list'])
                     if l['scale']:
                         temp_list = [i/self.factor for i in l['list']]
-                        report_writer.writerow([pd['name']] + self.problem.get_metadata_to_save() + ["scaled " + l['name']] + [abrev+"s"] + temp_list)
+                        report_writer.writerow([pd['name'], "scaled " + l['name'], abrev+"s"] + temp_list)
                     if 'norm' in l:
                         # print('  norm:'+l['norm'])
                         temp_list = [i/l['norm'][0] for i in l['list']]
-                        report_writer.writerow([pd['name']] + self.problem.get_metadata_to_save() + ["normalized " + l['name']] + [abrev+"n"] + temp_list)
+                        report_writer.writerow([pd['name'], "normalized " + l['name'], abrev+"n"] + temp_list)
                     if 'relative' in l:
                         norm_list = self.listDict[l['relative']]['list']
                         # print(key, len(l['list']),len(norm_list))
                         temp_list = [l['list'][i]/norm_list[i] for i in range(0, len(l['list']))]
                         self.listDict[key]['relative_list'] = temp_list
-                        report_writer.writerow([pd['name']] + self.problem.get_metadata_to_save() + ["relative " + l['name']] + [abrev+"r"] + temp_list)
+                        report_writer.writerow([pd['name'], "relative " + l['name'], abrev+"r"] + temp_list)
 
         # report error norm, norm of div, and pressure gradients averaged over seconds
         with open(self.str_dir_name + "/report_seconds.csv", 'w') as reportFile:
-            report_writer = csv.writer(reportFile, delimiter=';', escapechar='\\', quoting=csv.QUOTE_NONE)
-            report_writer.writerow(["name", 'metadata', "what", "time"] + self.second_list)
+            report_writer = csv.writer(reportFile, delimiter=';', escapechar='|', quoting=csv.QUOTE_NONE)
+            # report_writer.writerow(self.problem.get_metadata_to_save())
+            report_writer.writerow(["name", "what", "time"] + self.second_list)
             for key in self.listDict.iterkeys():
                 l = self.listDict[key]
                 if 'slist' in l:
                     abrev = l['abrev']
                     value = l['slist']
-                    report_writer.writerow([pd['name'], self.problem.get_metadata_to_save()[0], l['name'], abrev] + value)
+                    report_writer.writerow([pd['name'], l['name'], abrev] + value)
                     if l['scale']:
                         temp_list = [i/self.factor for i in value]
-                        report_writer.writerow([pd['name']] + self.problem.get_metadata_to_save() + ["scaled " + l['name']] + [abrev+"s"] + temp_list)
+                        report_writer.writerow([pd['name'], "scaled " + l['name'], abrev+"s"] + temp_list)
                     if 'norm' in l:
                         temp_list = [i/l['norm'][0] for i in value]
                         l['normalized_list_sec'] = temp_list
-                        report_writer.writerow([pd['name']] + self.problem.get_metadata_to_save() + ["normalized " + l['name']] + [abrev+"n"] + temp_list)
+                        report_writer.writerow([pd['name'], "normalized " + l['name'], abrev+"n"] + temp_list)
                     if 'relative_list' in l:
                         temp_list = []
                         # print('relative second list of', l['abrev'])
@@ -601,13 +603,11 @@ class ResultsManager:
                             # print(sec,  N0, N1)
                             temp_list.append(sqrt(sum([i*i for i in l['relative_list'][N0:N1]])/float(self.stepsInSecond)))
                         l['relative_list_sec'] = temp_list
-                        report_writer.writerow([pd['name']] + self.problem.get_metadata_to_save() + ["relative " + l['name']] + [abrev+"r"] + temp_list)
+                        report_writer.writerow([pd['name'], "relative " + l['name'], abrev+"r"] + temp_list)
 
-        header_row = ["problem", "name", 'metadata', "type", "method", "mesh_name", "solver", "factor", "time", "dt",
-                     "totalTimeHours", "timeToSolve", "timeToComputeErr"]
-        data_row = [pd['problem'], pd['name'], self.problem.get_metadata_to_save()[0], pd['type'], pd['method'],
-                    pd['mesh'], pd['solvers']+str(pd['solver precision']), self.factor, pd['cycles'], pd['dt_ms'],
-                    total/3600.0, total - self.time_erc, self.time_erc]
+        header_row = ["name", 'metadata', "totalTimeHours", "timeToSolve", "timeToComputeErr"]
+        data_row = [pd['name'], self.problem.get_metadata_to_save(), total / 3600.0, total - self.time_erc,
+                    self.time_erc]
         for key in ['u_L2', 'u_H1', 'u_H1w', 'p', 'u2L2', 'u2H1', 'u2H1w', 'p2', 'pgE', 'pgE2', 'd', 'd2', 'force_wall']:
             l = self.listDict[key]
             header_row += ['last_cycle_'+l['abrev']]
@@ -618,17 +618,15 @@ class ResultsManager:
             elif key in ['p', 'p2']:
                 header_row += ['last_cycle_'+l['abrev']+'n']
                 data_row += [l['normalized_list_sec'][-1]] if l['normalized_list_sec'] else [0]
-        header_row += ["mesh"]
-        data_row += [mesh]
 
         # report without header
         with open(self.str_dir_name + "/report.csv", 'w') as reportFile:
-            report_writer = csv.writer(reportFile, delimiter=';', escapechar='\\', quoting=csv.QUOTE_NONE)
+            report_writer = csv.writer(reportFile, delimiter=';', escapechar='|', quoting=csv.QUOTE_NONE)
             report_writer.writerow(data_row)
 
         # report with header
         with open(self.str_dir_name + "/report_h.csv", 'w') as reportFile:
-            report_writer = csv.writer(reportFile, delimiter=';', escapechar='\\', quoting=csv.QUOTE_NONE)
+            report_writer = csv.writer(reportFile, delimiter=';', escapechar='|', quoting=csv.QUOTE_NONE)
             report_writer.writerow(header_row)
             report_writer.writerow(data_row)
 

@@ -3,7 +3,7 @@ import csv, os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-import problem
+import problem as prb
 __author__ = 'jh'
 
 parser = argparse.ArgumentParser()
@@ -15,9 +15,113 @@ os.chdir(args.dir)
 if not os.path.exists('plots'):
     os.mkdir('plots')
 
+
+# load general reports =========================================================================
+csvfile = open('done_merged.csv', 'r')
+csvreader = csv.reader(csvfile, delimiter=';', escapechar='|')
+header = next(csvreader)[2:]
+characteristics = []
+ch_index = {}
+for item in header:
+    if str(item).startswith('last_cycle_') and (str(item).endswith('r') or str(item).endswith('n')):
+        characteristics.append(item[11:])
+        ch_index[item[11:]] = header.index(item)
+print('Used characteristics:', characteristics)
+problems = {}
+for line in csvreader:
+    # collect names of problems (first five chars of parameter "name")
+    problem_name = line[0][0:5]
+    report_list = []
+    for value in line[2:]:
+        report_list.append(float(value))
+    if problem_name not in problems:
+        problems[problem_name] = {line[0]: {'report': report_list, 'md': prb.load_metadata(line[1])}}
+    else:
+        problems[problem_name][line[0]] = {'report': report_list, 'md': prb.load_metadata(line[1])}
+csvfile.close()
+
+print(len(problems.items()))
+
+factors = {1: '0.01', 2: '0.05', 3: '0.1', 4: '0.5', 5: '1.0'}
+meshes = range(1, 4)
+formats3 = ['x--', '+--', '.--']
+formats5 = ['x--', '^--', '.--', 'o--', '+--']
+dts = {1: 100, 2: 50, 3: 10, 4: 5, 5: 1}
+# create convergence plots =========================================================================
+for ch in characteristics:
+    # CHARACTERISTIC/DT
+    for (f, fs) in factors.iteritems():
+        plot_empty = True
+        p_number = 0
+        for problem in problems.iterkeys():
+            # TODO problem comparison
+            colors = plt.get_cmap('jet')(np.linspace(0, 1.0, len(problems.items())))
+            for i in meshes:
+                x = []
+                y = []
+                for (t, dt_ms) in dts.iteritems():
+                    name = problem + ('%d%d%d' % (f, i, t))
+                    if name in problems[problem]:
+                        d = problems[problem][name]
+                        y.append(d['report'][ch_index[ch]])
+                        x.append(dt_ms)
+                if y and sum(y) > 0:
+                    plot_empty = False
+                    print(x, y)
+                    plt.plot(x, y, formats3[i-1], label=problem + (' on mesh %d' % i), color=colors[p_number])
+            p_number += 1
+        if not plot_empty:
+            plt.xlabel('dt in ms')
+            plt.xscale('log')
+            plt.yscale('log')
+            axis = plt.axis()
+            print(axis)
+            axis = [100, 1, axis[2], axis[3]]
+            plt.axis(axis)
+            plt.title(ch + ' for factor=' + fs)
+            lgd = plt.legend(bbox_to_anchor=(1.5, 1.0))
+            plt.savefig('plots/C_' + ch + '_f%d' % f + '_CT.png', bbox_extra_artists=(lgd,), bbox_inches='tight')
+        plt.close()
+    # CHARACTERISTIC/H
+    for (f, fs) in factors.iteritems():
+        plot_empty = True
+        p_number = 0
+        for problem in problems.iterkeys():
+            # TODO problem comparison
+            colors = plt.get_cmap('jet')(np.linspace(0, 1.0, len(problems.items())))
+            for (t, dt_ms) in dts.iteritems():
+                x = []
+                y = []
+                for i in meshes:
+                    name = problem + ('%d%d%d' % (f, i, t))
+                    if name in problems[problem]:
+                        d = problems[problem][name]
+                        y.append(d['report'][ch_index[ch]])
+                        x.append(d['md']['h'])
+                if y and sum(y) > 0:
+                    plot_empty = False
+                    print(x, y)
+                    plt.plot(x, y, formats5[t-1], label=problem + (' with dt %d' % dt_ms), color=colors[p_number])
+            p_number += 1
+        if not plot_empty:
+            plt.xlabel('dt in ms')
+            plt.xscale('log')
+            plt.yscale('log')
+            axis = plt.axis()
+            print(axis)
+            axis = [2.3, 0.5, axis[2], axis[3]]
+            plt.axis(axis)
+            plt.xticks([2, 1, 0.5])  # TODO enforce labels, this does not work
+            plt.title(ch + ' for factor=' + fs)
+            lgd = plt.legend(bbox_to_anchor=(1.5, 1.0))
+            plt.savefig('plots/C_' + ch + '_f%d' % f + '_CS.png', bbox_extra_artists=(lgd,), bbox_inches='tight')
+        plt.close()
+
+exit()
+
 # reports over seconds =========================================================================
 csvfile = open('done_merged_seconds.csv', 'r')
-csvreader = csv.reader(csvfile, delimiter=';')
+csvreader = csv.reader(csvfile, delimiter=';', escapechar='|')
 seconds_list = next(csvreader)
 l = len(seconds_list)
 seconds_list = [int(x) for x in seconds_list[4:l]]
@@ -44,10 +148,11 @@ for type_key in data_types.iterkeys():
     colors = plt.get_cmap('jet')(np.linspace(0, 1.0, data_types[type_key][0]))
     i = 0
     # TODO use less collors using different line types (write function of N to create list of formatstrings and colors)
+    # TODO colors should respect problem configurations
     for data in data_list:
         if data[2] == type_key and data[3:]:
             # print(data[3:])
-            newmax = max(data[4:])  # first value is not counted for maximum
+            newmax = max(data[4:])  # first value is not counted for maximum (it is too high)
             if newmax > max_value:
                 max_value = newmax
             plt.plot(seconds_list, data[3:], '.-', label=data[0], color=colors[i])
@@ -67,7 +172,7 @@ for type_key in data_types.iterkeys():
 exit()
 # TODO different timesteps? introduce timestep value into .csv
 csvfile = open('done_merged_time_lines.csv', 'r')
-csvreader = csv.reader(csvfile, delimiter=';')
+csvreader = csv.reader(csvfile, delimiter=';', escapechar='|')
 time_list = next(csvreader)
 l = len(time_list)
 time_list = [float(x) for x in time_list[3:l]]
@@ -113,30 +218,3 @@ for type_key in data_types.iterkeys():
         plt.savefig('plots/TL_' + type_key + '.png')
     plt.close()
 
-# general reports =========================================================================
-csvfile = open('done_merged.csv', 'r')
-csvreader = csv.reader(csvfile, delimiter=';')
-header = next(csvreader)
-data_list = []
-problem_list = []
-for line in csvreader:
-    # collect names of problems (first five chars of parameter "name")
-    problem_name = line[1][0:5]
-    if not problem_name in problem_list:
-        problem_list.append(problem_name)
-
-    data_list.append([problem_name] + line)
-    metadata = problem.load_metadata(line[2])
-    print(type(metadata), metadata)
-
-# NT convert data to float!
-csvfile.close()
-
-exit()
-
-for i in range(len(header)):
-    h = str(header[i])
-    if h.startswith('last_cycle'):
-        for problem in problem_list:
-            print()
-            # TODO create convergence plots

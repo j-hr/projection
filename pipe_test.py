@@ -132,6 +132,7 @@ rm.dsWall = dsWall
 print("Mesh name: ", meshName, "    ", mesh)
 print("Mesh norm max: ", mesh.hmax())
 print("Mesh norm min: ", mesh.hmin())
+problem.d()['mesh_info'] = str(mesh)
 # ======================================================================================================================
 # Define function spaces (P2-P1)
 V = VectorFunctionSpace(mesh, "Lagrange", 2)  # velocity

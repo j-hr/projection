@@ -36,7 +36,7 @@ class Problem:
         return self.metadata
 
     def get_metadata_to_save(self):
-        return [str(cPickle.dumps(self.metadata)).replace('\n', '$')]
+        return str(cPickle.dumps(self.metadata)).replace('\n', '$')
 
 def load_metadata(code):
     return cPickle.loads(code.replace('$', '\n'))
