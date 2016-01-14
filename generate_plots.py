@@ -44,8 +44,8 @@ print(len(problems.items()))
 
 factors = {1: '0.01', 2: '0.05', 3: '0.1', 4: '0.5', 5: '1.0'}
 meshes = range(1, 4)
-formats3 = ['x--', '+--', '.--']
-formats5 = ['x--', '^--', '.--', 'o--', '+--']
+formats3 = ['x:', '+:', '1:']
+formats5 = ['1:', '2:', '.:', 'x:', '+:']
 dts = {1: 100, 2: 50, 3: 10, 4: 5, 5: 1}
 # create convergence plots =========================================================================
 for ch in characteristics:
@@ -67,7 +67,7 @@ for ch in characteristics:
                         x.append(dt_ms)
                 if y and sum(y) > 0:
                     plot_empty = False
-                    print(x, y)
+                    print(ch, ' on mesh ', i, x, y)
                     plt.plot(x, y, formats3[i-1], label=problem + (' on mesh %d' % i), color=colors[p_number])
             p_number += 1
         if not plot_empty:
@@ -75,7 +75,7 @@ for ch in characteristics:
             plt.xscale('log')
             plt.yscale('log')
             axis = plt.axis()
-            print(axis)
+            # print(axis)
             axis = [100, 1, axis[2], axis[3]]
             plt.axis(axis)
             plt.title(ch + ' for factor=' + fs)
@@ -84,6 +84,8 @@ for ch in characteristics:
         plt.close()
     # CHARACTERISTIC/H
     for (f, fs) in factors.iteritems():
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
         plot_empty = True
         p_number = 0
         for problem in problems.iterkeys():
@@ -100,18 +102,18 @@ for ch in characteristics:
                         x.append(d['md']['h'])
                 if y and sum(y) > 0:
                     plot_empty = False
-                    print(x, y)
-                    plt.plot(x, y, formats5[t-1], label=problem + (' with dt %d' % dt_ms), color=colors[p_number])
+                    print(ch, ' dt: ', dt_ms, x, y)
+                    ax.plot(x, y, formats5[t-1], label=problem + (' with dt %d' % dt_ms), color=colors[p_number])
             p_number += 1
         if not plot_empty:
-            plt.xlabel('dt in ms')
+            plt.xlabel('h')
             plt.xscale('log')
             plt.yscale('log')
             axis = plt.axis()
-            print(axis)
+            # print(axis)
             axis = [2.3, 0.5, axis[2], axis[3]]
             plt.axis(axis)
-            plt.xticks([2, 1, 0.5])  # TODO enforce labels, this does not work
+            plt.xticks((2.0, 1.0, 0.5), ('2.0', '1.0', '0.5'))
             plt.title(ch + ' for factor=' + fs)
             lgd = plt.legend(bbox_to_anchor=(1.5, 1.0))
             plt.savefig('plots/C_' + ch + '_f%d' % f + '_CS.png', bbox_extra_artists=(lgd,), bbox_inches='tight')
