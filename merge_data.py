@@ -10,14 +10,18 @@ parser.add_argument('-dir', help='working directory', type=str, default=".")
 args = parser.parse_args()
 print(args)
 os.chdir(args.dir)
+dtToI = {'0.1': 1, '0.05': 2, '0.01': 3, '0.005': 4, '0.001': 5}
 
 header = ''
 header_seconds = ''
-header_time_lines = ''
+headers_time_lines = ['not_used', '', '', '', '', '']
 search_dirs = []
 merged_report = open('temp_merged.csv', 'w')
 merged_report_seconds = open('temp_merged_seconds.csv', 'w')
-merged_report_time_lines = open('temp_merged_time_lines.csv', 'w')
+merged_report_time_lines = ['not_used']
+for i in range(1, 6):
+    temp = open('temp_merged_time_lines%d.csv' % i, 'w')
+    merged_report_time_lines.append(temp)
 for f in os.listdir(os.path.abspath(os.curdir)):
     # print(f)
     if f[0] != '.':
@@ -60,20 +64,21 @@ for sd in search_dirs:
             if f == 'report_time_lines.csv':
                 filepath = os.path.join(os.path.abspath(sd), f)
                 openfile = open(filepath, 'r')
-                if header_time_lines == '':
-                    header_time_lines = openfile.readline()
-                    merged_report_time_lines.write(header_time_lines)
-                else:
-                    openfile.readline()
+                first = openfile.readline()
+                i = dtToI[first.split(';', 4)[3]]
+                if headers_time_lines[i] == '':
+                    headers_time_lines[i] = first
+                    merged_report_time_lines[i].write(headers_time_lines[i])
                 for line in openfile:
-                    merged_report_time_lines.write(line)
+                    merged_report_time_lines[i].write(line)
                 print(filepath)
 merged_report.close()
 merged_report_seconds.close()
-merged_report_time_lines.close()
+for i in range(1, 6):
+    merged_report_time_lines[i].close()
+    os.rename('temp_merged_time_lines%d.csv' % i, 'done_merged_time_lines%d.csv' % i)
 os.rename('temp_merged.csv', 'done_merged.csv')
 os.rename('temp_merged_seconds.csv', 'done_merged_seconds.csv')
-os.rename('temp_merged_time_lines.csv', 'done_merged_time_lines.csv')
 
 
 
