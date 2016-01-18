@@ -10,10 +10,12 @@ __author__ = 'jh'
 characteristics = []
 ch_index = {}
 problems = {}
+problem_list = []
 characteristics_seconds = []
 characteristics_timelines = []
 times = {}
 
+color_set = 'Dark2'   # e. g. 'Set1', 'Dark2', 'brg', 'jet'
 dpi = 300
 factors = {1: '0.01', 2: '0.05', 3: '0.1', 4: '0.5', 5: '1.0'}
 meshes = range(1, 4)
@@ -21,8 +23,8 @@ dts = {1: 100, 2: 50, 3: 10, 4: 5, 5: 1}
 dtToSteps = {1: 10, 2: 20, 3: 100, 4: 200, 5: 1000}  # time steps per second
 
 
-def savefig(path, lgd, **kwargs):
-    plt.savefig(path, bbox_extra_artists=(lgd,), bbox_inches='tight', dpi=dpi, **kwargs)
+def savefig(figure, path, lgd, **kwargs):
+    figure.savefig(path, bbox_extra_artists=(lgd,), bbox_inches='tight', dpi=dpi, **kwargs)
 
 
 def minmax(minval, maxval, newmin, newmax):
@@ -31,6 +33,10 @@ def minmax(minval, maxval, newmin, newmax):
     if newmax > maxval:
         maxval = newmax
     return minval, maxval
+
+
+def color(color_number, color_range):
+    return plt.get_cmap(color_set)(np.linspace(0, 1.0, color_range))[color_number]
 
 
 # load general reports =========================================================================
@@ -51,10 +57,11 @@ def load_general_reports():
             report_list.append(float(value))
         if problem_name not in problems:
             problems[problem_name] = {line[0]: {'report': report_list, 'md': prb.load_metadata(line[1])}}
+            problem_list.append(problem_name)
         else:
             problems[problem_name][line[0]] = {'report': report_list, 'md': prb.load_metadata(line[1])}
     csvfile.close()
-    print(len(problems.items()))
+    print('Loaded problems:', problem_list)
 
 
 # reports over seconds - load data =========================================================================
@@ -102,22 +109,30 @@ def load_timelines_data():
 # create convergence plots =========================================================================
 # default characteristics: ['CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'TE_L2r', 'TE_H1r', 'TE_H1wr', 'PTEn', 'FEr']
 def create_convergence_plots():
-    # TODO simplify code using subplots (create both convergence plots simultaneously) or by using figures as variables?
     formats3 = ['x:', '+--', '1-']
     line_widths3 = [3.0, 2.0, 1.5]
+    formats5 = ['1:', '2:', '3:', 'x:', '+:']
     line_width5 = 3.0
     marker_size = 10.0
     marker_edge_width = 2.0
-    formats5 = ['1:', '2:', '3:', 'x:', '+:']
     for ch in characteristics:
         # CHARACTERISTIC/DT
+        print('Convergence in time:', ch)
         for (f, fs) in factors.iteritems():
-            plot_empty = True
-            p_number = 0
+            print('  f =', fs)
+            # create figures and subplot instances
+            plots = {}
+            fig_idx = 1
+            for (plot_name, plot_set) in c_plot.iteritems():
+                plots[plot_name] = {}
+                plots[plot_name]['fig'] = plt.figure(fig_idx)
+                plots[plot_name]['spl'] = plots[plot_name]['fig'].add_subplot('111')
+                plots[plot_name]['set'] = plot_set
+                plots[plot_name]['empty'] = True
+                fig_idx += 1
+
             for problem in problems.iterkeys():
-                # TODO problem comparison
-                # TODO better colors
-                colors = plt.get_cmap('jet')(np.linspace(0, 1.0, len(problems.items())))
+                print('    problem =', problem)
                 for i in meshes:
                     x = []
                     y = []
@@ -130,99 +145,47 @@ def create_convergence_plots():
                                 y.append(value)
                                 x.append(dt_ms)
                     if y and sum(y) > 0:
-                        plot_empty = False
-                        print(ch, ' on mesh ', i, x, y)
-                        plt.plot(x, y, formats3[i-1], label=problem + (' on mesh %d' % i), color=colors[p_number],
-                                 lw=line_widths3[i-1], ms=marker_size, mew=marker_edge_width)
-                p_number += 1
-            if not plot_empty:
-                plt.xlabel('dt in ms')
-                plt.xscale('log')
-                plt.yscale('log')
-                axis = plt.axis()
-                # print(axis)
-                axis = [105, 0.95, axis[2], axis[3]]
-                plt.axis(axis)
-                plt.title(ch + ' for factor=' + fs)
-                lgd = plt.legend(bbox_to_anchor=(1.5, 1.0))
-                savefig('plots/C_' + ch + '_f%d' % f + '_CT.png', lgd)
-            plt.close()
-        # CHARACTERISTIC/H
-        for (f, fs) in factors.iteritems():
-            fig = plt.figure()
-            plot_empty = True
-            p_number = 0
-            for problem in problems.iterkeys():
-                # TODO problem comparison
-                colors = plt.get_cmap('jet')(np.linspace(0, 1.0, len(problems.items())))
-                for (t, dt_ms) in dts.iteritems():
-                    x = []
-                    y = []
-                    for i in meshes:
-                        name = problem + ('%d%d%d' % (f, i, t))
-                        if name in problems[problem]:
-                            d = problems[problem][name]
-                            value = d['report'][ch_index[ch]]
-                            if value < 1e12:  # do not plot values from diverging problems
-                                y.append(value)
-                                x.append(d['md']['h'])
-                    if y and sum(y) > 0:
-                        plot_empty = False
-                        print(ch, ' dt: ', dt_ms, x, y)
-                        plt.plot(x, y, formats5[t-1], label=problem + (' with dt %d' % dt_ms), color=colors[p_number],
-                                 lw=line_width5, ms=marker_size, mew=marker_edge_width)
-                p_number += 1
-            if not plot_empty:
-                plt.xlabel('h')
-                plt.xscale('log')
-                plt.yscale('log')
-                axis = plt.axis()
-                # print(axis)
-                axis = [2.3, 0.5, axis[2], axis[3]]
-                plt.axis(axis)
-                plt.xticks((2.0, 1.0, 0.5), ('2.0', '1.0', '0.5'))
-                plt.title(ch + ' for factor=' + fs)
-                lgd = plt.legend(bbox_to_anchor=(1.5, 1.0))
-                savefig('plots/C_' + ch + '_f%d' % f + '_CS.png', lgd)
-            plt.close()
-    # same plots for individual problems
-    for ch in characteristics:
-        # CHARACTERISTIC/DT
-        for (f, fs) in factors.iteritems():
-            for problem in problems.iterkeys():
-                plot_empty = True
-                for i in meshes:
-                    x = []
-                    y = []
-                    for (t, dt_ms) in dts.iteritems():
-                        name = problem + ('%d%d%d' % (f, i, t))
-                        if name in problems[problem]:
-                            d = problems[problem][name]
-                            value = d['report'][ch_index[ch]]
-                            if value < 1e12:  # do not plot values from diverging problems
-                                y.append(value)
-                                x.append(dt_ms)
-                    if y and sum(y) > 0:
-                        plot_empty = False
-                        print(ch, ' on mesh ', i, x, y)
-                        plt.plot(x, y, formats3[i-1], label=problem + (' on mesh %d' % i),
-                                 lw=line_widths3[i-1], ms=marker_size, mew=marker_edge_width)
-                if not plot_empty:
-                    plt.xlabel('dt in ms')
-                    plt.xscale('log')
-                    plt.yscale('log')
-                    axis = plt.axis()
-                    # print(axis)
+                        print('      ', ch, ' on mesh ', i, x, y)
+                        for (plot_name, plot) in plots.iteritems():
+                            if problem in plot['set']:
+                                plot['empty'] = False
+                                idx = plot['set'].index(problem)
+                                rng = len(plot['set'])
+                                plot['spl'].plot(x, y, formats3[i-1], label=problem + (' on mesh %d' % i),
+                                                 color=color(idx, rng), lw=line_widths3[i - 1], ms=marker_size,
+                                                 mew=marker_edge_width)
+            for (plot_name, plot) in plots.iteritems():
+                if not plot['empty']:
+                    axes = plot['fig'].axes[0]
+                    plot['spl'].set_xlabel('dt in ms')
+                    axes.set_xscale('log')
+                    axes.set_yscale('log')
+                    axis = axes.axis()
                     axis = [105, 0.95, axis[2], axis[3]]
-                    plt.axis(axis)
-                    plt.title(ch + ' for factor=' + fs)
-                    lgd = plt.legend(bbox_to_anchor=(1.5, 1.0))
-                    savefig('plots/C_' + ch + '_f%d' % f + problem + '_CT.png', lgd)
+                    axes.axis(axis)
+                    axes.set_title(plot_name + ' ' + ch + ' for factor=' + fs)
+                    lgd = axes.legend(bbox_to_anchor=(1.5, 1.0))
+                    savefig(plot['fig'], 'plots/C_' + plot_name + '_' + ch + '_f%d' % f + '_CT.png', lgd)
+            for idx in range(1, fig_idx):
+                plt.figure(idx)
                 plt.close()
         # CHARACTERISTIC/H
+        print('Convergence in space:', ch)
         for (f, fs) in factors.iteritems():
+            print('  f =', fs)
+            # create figures and subplot instances
+            plots = {}
+            fig_idx = 1
+            for (plot_name, plot_set) in c_plot.iteritems():
+                plots[plot_name] = {}
+                plots[plot_name]['fig'] = plt.figure(fig_idx)
+                plots[plot_name]['spl'] = plots[plot_name]['fig'].add_subplot('111')
+                plots[plot_name]['set'] = plot_set
+                plots[plot_name]['empty'] = True
+                fig_idx += 1
+
             for problem in problems.iterkeys():
-                plot_empty = True
+                print('    problem =', problem)
                 for (t, dt_ms) in dts.iteritems():
                     x = []
                     y = []
@@ -235,27 +198,36 @@ def create_convergence_plots():
                                 y.append(value)
                                 x.append(d['md']['h'])
                     if y and sum(y) > 0:
-                        plot_empty = False
-                        print(ch, ' dt: ', dt_ms, x, y)
-                        plt.plot(x, y, formats5[t-1], label=problem + (' with dt %d' % dt_ms),
-                                 lw=line_width5, ms=marker_size, mew=marker_edge_width)
-                if not plot_empty:
-                    plt.xlabel('h')
-                    plt.xscale('log')
-                    plt.yscale('log')
-                    axis = plt.axis()
-                    # print(axis)
+                        print('        ', ch, ' dt: ', dt_ms, x, y)
+                        for (plot_name, plot) in plots.iteritems():
+                            if problem in plot['set']:
+                                plot['empty'] = False
+                                idx = plot['set'].index(problem)
+                                rng = len(plot['set'])
+                                plot['spl'].plot(x, y, formats5[t-1], label=problem + (' with dt %d' % dt_ms),
+                                                 color=color(idx, rng), lw=line_width5, ms=marker_size,
+                                                 mew=marker_edge_width)
+            for (plot_name, plot) in plots.iteritems():
+                if not plot['empty']:
+                    axes = plot['fig'].axes[0]
+                    plot['spl'].set_xlabel('h')
+                    axes.set_xscale('log')
+                    axes.set_yscale('log')
+                    axis = axes.axis()
                     axis = [2.3, 0.5, axis[2], axis[3]]
-                    plt.axis(axis)
-                    plt.xticks((2.0, 1.0, 0.5), ('2.0', '1.0', '0.5'))
-                    plt.title(ch + ' for factor=' + fs)
-                    lgd = plt.legend(bbox_to_anchor=(1.5, 1.0))
-                    savefig('plots/C_' + ch + '_f%d' % f + problem + '_CS.png', lgd)
+                    axes.axis(axis)
+                    axes.set_xticks([2.0, 1.0, 0.5])
+                    axes.set_xticklabels(['2.0', '1.0', '0.5'])
+                    axes.set_title(plot_name + ' ' + ch + ' for factor=' + fs)
+                    lgd = axes.legend(bbox_to_anchor=(1.5, 1.0))
+                    savefig(plot['fig'], 'plots/C_' + plot_name + '_' + ch + '_f%d' % f + '_CS.png', lgd)
+            for idx in range(1, fig_idx):
+                plt.figure(idx)
                 plt.close()
 
 
 def create_timelines_plots():
-    formats3 = ['-', '--', ':']
+    formats3 = [':', '--', '-']
     line_widths3 = [2.0, 1.5, 1.0]
     for ch in plot1:
         if ch in characteristics_timelines:
@@ -265,7 +237,7 @@ def create_timelines_plots():
                 for problem in problems.iterkeys():
                     print('    problem =', problem)
                     plot_empty = True
-                    colors = plt.get_cmap('jet')(np.linspace(0, 1.0, 5))
+                    colors = plt.get_cmap(color_set)(np.linspace(0, 1.0, 5))
                     max_ = 0
                     min_ = 1e16
                     max_l = 0
@@ -314,7 +286,7 @@ def create_timelines_plots():
                     print('    problem =', problem)
                     for i in meshes:
                         plot_empty = True
-                        colors = plt.get_cmap('jet')(np.linspace(0, 1.0, 5))
+                        colors = plt.get_cmap(color_set)(np.linspace(0, 1.0, 5))
                         max_ = 0
                         min_ = 1e16
                         max_l = 0
@@ -366,6 +338,14 @@ load_general_reports()
 load_seconds_data()
 load_timelines_data()
 characteristics = ['CE_H1r']
+# define convergence plots
+c_plot = {'all': ['IBC_I', 'IBCbI', 'IBCrI', 'IBCRI'],
+          'normal vs no3bc': ['IBC_I', 'IBCbI'],
+          'normal vs rotation': ['IBC_I', 'IBCRI'],
+          'rotation vs rot+no3bc': ['IBCRI', 'IBCrI']}
+for oneplot in c_plot['all']:
+    c_plot[oneplot] = [oneplot]
+
 create_convergence_plots()
 # last time characteristics for timelines:
 # 'AVN_L2', 'AVN_H1',
@@ -408,7 +388,7 @@ create_timelines_plots()
 #     print(type_key, data_types[type_key])
 #     max_value = 0
 #     empty_plot = True
-#     colors = plt.get_cmap('jet')(np.linspace(0, 1.0, data_types[type_key][0]))
+#     colors = plt.get_cmap(color_set)(np.linspace(0, 1.0, data_types[type_key][0]))
 #     i = 0
 #     # TODO use less collors using different line types (write function of N to create list of formatstrings and colors)
 #     # TODO colors should respect problem configurations
