@@ -161,7 +161,8 @@ if args.type == "steady":
                        (factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1])))"),
                       t=0, factor=factor)
 else:
-    v_in = Function(V)  # IMP
+    # update by assigning precomputed analytic solution
+    v_in = Function(V)
 
 # Initial Conditions====================================================================================================
 if args.type == "pulsePrec":
@@ -242,10 +243,10 @@ def set_projection_solvers():
     global solver_p, solver_vel, solver_rot, null_space
 
     if args.solvers == 'direct':
-        solver_vel = LUSolver('mumps')
-        solver_p = LUSolver('mumps')
+        solver_vel = LUSolver('umfpack')
+        solver_p = LUSolver('umfpack')
         if useRotationScheme:
-            solver_rot = LUSolver('mumps')
+            solver_rot = LUSolver('umfpack')
     else:
         solver_vel = KrylovSolver('gmres', 'ilu')   # nonsymetric > gmres  # IFNEED try hypre_amg
         solver_p = KrylovSolver('cg', args.prec)          # symmetric > CG

@@ -180,8 +180,14 @@ class ResultsManager:
             'av_norm_H1': {'list': [], 'name': 'analytic velocity H1 norm', 'abrev': 'AVN_H1', 'scale': False},
             'av_norm_H1w': {'list': [], 'name': 'analytic velocity H1 norm on wall', 'abrev': 'AVN_H1w', 'scale': False},
             'a_force_wall': {'list': [], 'name': 'analytic force on wall', 'abrev': 'AF', 'scale': False},
+            'a_force_wall_normal': {'list': [], 'name': 'analytic force on wall', 'abrev': 'AFN', 'scale': False},
+            'a_force_wall_shear': {'list': [], 'name': 'analytic force on wall', 'abrev': 'AFS', 'scale': False},
             'force_wall': {'list': [], 'name': 'force error on wall', 'abrev': 'FE', 'scale': False,
                            'relative': 'a_force_wall', 'slist': []},
+            'force_wall_normal': {'list': [], 'name': 'normal force error on wall', 'abrev': 'FNE', 'scale': False,
+                                  'relative': 'a_force_wall_normal', 'slist': []},
+            'force_wall_shear': {'list': [], 'name': 'shear force error on wall', 'abrev': 'FSE', 'scale': False,
+                                 'relative': 'a_force_wall_shear', 'slist': []},
             'ap_norm': {'list': [], 'name': 'analytic pressure norm', 'abrev': 'APN', 'scale': False},
             'p': {'list': [], 'name': 'pressure L2(0) error', 'abrev': 'PE', 'scale': True, 'slist': [],
                   'norm': self.p_normalization_factor},
@@ -524,14 +530,31 @@ class ResultsManager:
         error_force = math.sqrt(
                 assemble(inner((T(pressure, velocity) - T(self.sol_p, self.solution)) * normal,
                                (T(pressure, velocity) - T(self.sol_p, self.solution)) * normal) * self.dsWall))
-        analytic_force = math.sqrt(assemble(inner(T(self.sol_p, self.solution) * normal,
-                                                  T(self.sol_p, self.solution) * normal) * self.dsWall))
-        self.listDict['a_force_wall']['list'].append(analytic_force)
+        an_force = math.sqrt(assemble(inner(T(self.sol_p, self.solution) * normal,
+                                            T(self.sol_p, self.solution) * normal) * self.dsWall))
+        an_f_normal = math.sqrt(assemble(inner(inner(T(self.sol_p, self.solution) * normal, normal),
+                                               inner(T(self.sol_p, self.solution) * normal, normal)) * self.dsWall))
+        error_f_normal = math.sqrt(
+                assemble(inner(inner((T(self.sol_p, self.solution) - T(pressure, velocity)) * normal, normal),
+                               inner((T(self.sol_p, self.solution) - T(pressure, velocity)) * normal, normal)) * self.dsWall))
+        an_f_shear = math.sqrt(
+                assemble(inner((I - outer(normal, normal)) * T(self.sol_p, self.solution) * normal,
+                               (I - outer(normal, normal)) * T(self.sol_p, self.solution) * normal) * self.dsWall))
+        error_f_shear = math.sqrt(
+                assemble(inner((I - outer(normal, normal)) *
+                               (T(self.sol_p, self.solution) - T(pressure, velocity)) * normal,
+                               (I - outer(normal, normal)) *
+                               (T(self.sol_p, self.solution) - T(pressure, velocity)) * normal) * self.dsWall))
+        self.listDict['a_force_wall']['list'].append(an_force)
+        self.listDict['a_force_wall_normal']['list'].append(an_f_normal)
+        self.listDict['a_force_wall_shear']['list'].append(an_f_shear)
         self.listDict['force_wall']['list'].append(error_force)
+        self.listDict['force_wall_normal']['list'].append(error_f_normal)
+        self.listDict['force_wall_shear']['list'].append(error_f_shear)
         if self.isWholeSecond:
             self.listDict['force_wall']['slist'].append(
                 math.sqrt(sum([i*i for i in self.listDict['force_wall']['list'][self.N0:self.N1]])/self.stepsInSecond))
-        print('  Relative force error:', error_force/analytic_force)
+        print('  Relative force error:', error_force/an_force)
         self.tc.end('errorForce')
 
 # Reports ==============================================================================================================
