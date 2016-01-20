@@ -15,9 +15,10 @@ characteristics_seconds = []
 characteristics_timelines = []
 times = {}
 
-color_set = 'Dark2'   # e. g. 'Set1', 'Dark2', 'brg', 'jet'
+color_set = 'Set1'   # e. g. 'Set1', 'Dark2', 'brg', 'jet'
 dpi = 300
 factors = {1: '0.01', 2: '0.05', 3: '0.1', 4: '0.5', 5: '1.0'}
+# factors = {1: '0.01'}
 meshes = range(1, 4)
 dts = {1: 100, 2: 50, 3: 10, 4: 5, 5: 1}
 dtToSteps = {1: 10, 2: 20, 3: 100, 4: 200, 5: 1000}  # time steps per second
@@ -93,18 +94,21 @@ def load_timelines_data():
     for i in range(1, 6):
         csvfile = open('done_merged_time_lines%d.csv' % i, 'r')
         csvreader = csv.reader(csvfile, delimiter=';', escapechar='|')
-        line = next(csvreader)
-        times[i] = [float(x) for x in line[3:]]
-        print(times[i])
-        for line in csvreader:
-            data_place = problems[line[0][0:5]][line[0]]
-            data_list = [float(x) for x in line[3:]]
-            if 'timelines' in data_place:
-                data_place['timelines'][line[2]] = data_list
-            else:
-                data_place['timelines'] = {line[2]: data_list}
-            if not line[2] in characteristics_timelines:
-                characteristics_timelines.append(line[2])
+        try:
+            line = next(csvreader)
+            times[i] = [float(x) for x in line[3:]]
+            print(times[i])
+            for line in csvreader:
+                data_place = problems[line[0][0:5]][line[0]]
+                data_list = [float(x) for x in line[3:]]
+                if 'timelines' in data_place:
+                    data_place['timelines'][line[2]] = data_list
+                else:
+                    data_place['timelines'] = {line[2]: data_list}
+                if not line[2] in characteristics_timelines:
+                    characteristics_timelines.append(line[2])
+        except StopIteration:
+            print('  File empty.')
         csvfile.close()
     print('Characteristics for time-lines:', characteristics_timelines)
 
@@ -254,10 +258,9 @@ def create_timelines_plots():
                                 d = problems[problem][name]
                                 y = d['timelines'][ch]
                                 x = times[t]
-                                print('      ' + name + ' data sizes (x, y):', len(x), len(y), 'expected', 6*dtToSteps[t])
+                                print('      ' + name + ' data sizes (x, y):', len(x), len(y), 'expected', d['md']['cycles']*dtToSteps[t])
                                 min_, max_ = minmax(min_, max_, min(y[dtToSteps[t]:]), max(y[dtToSteps[t]:]))
-                                min_l, max_l = minmax(min_l, max_l, min(y[5*dtToSteps[t]:]), max(y[5*dtToSteps[t]:]))
-                                # NT programmed only for 6 cycles!
+                                min_l, max_l = minmax(min_l, max_l, min(y[(d['md']['cycles']-1)*dtToSteps[t]:]), max(y[(d['md']['cycles']-1)*dtToSteps[t]:]))
                             if y:
                                 plot_empty = False
                                 plt.plot(x, y, formats3[i-1], label=problem + (' on mesh %d' % i) + 'with dt=%d ms' % dt_ms,
@@ -266,13 +269,13 @@ def create_timelines_plots():
                         plt.xlabel('time')
                         if ch.endswith('r') and max_ > 10:
                             max_ = 10
-                        axis = [0, 6, min_, max_]  # NT programmed only for 6 cycles!
+                        axis = [0, d['md']['cycles'], min_, max_]
                         plt.axis(axis)
                         plt.title(ch + ' for ' + problem + ' for factor=' + fs)
                         lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
                         savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + '.png', lgd)
                         # save same plot only for last cycle
-                        axis = [5, 6, min_l, max_l]  # NT programmed only for 6 cycles!
+                        axis = [d['md']['cycles']-1, d['md']['cycles'], min_l, max_l]
                         plt.axis(axis)
                         plt.title(ch + ' for ' + problem + ' for factor=' + fs)
                         lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
@@ -302,10 +305,9 @@ def create_timelines_plots():
                                 d = problems[problem][name]
                                 y = d['timelines'][ch]
                                 x = times[t]
-                                print('      ' + name + ' data sizes (x, y):', len(x), len(y), 'expected', 6*dtToSteps[t])
+                                print('      ' + name + ' data sizes (x, y):', len(x), len(y), 'expected', d['md']['cycles']*dtToSteps[t])
                                 min_, max_ = minmax(min_, max_, min(y[dtToSteps[t]:]), max(y[dtToSteps[t]:]))
-                                min_l, max_l = minmax(min_l, max_l, min(y[5*dtToSteps[t]:]), max(y[5*dtToSteps[t]:]))
-                                # NT programmed only for 6 cycles!
+                                min_l, max_l = minmax(min_l, max_l, min(y[(d['md']['cycles']-1)*dtToSteps[t]:]), max(y[(d['md']['cycles']-1)*dtToSteps[t]:]))
                             if y:
                                 plot_empty = False
                                 plt.plot(x, y, '-', label=problem + (' on mesh %d' % i) + 'with dt=%d ms' % dt_ms,
@@ -314,12 +316,12 @@ def create_timelines_plots():
                             plt.xlabel('time')
                             if ch.endswith('r') and max_ > 10:
                                 max_ = 10
-                            axis = [0, 6, min_, max_]  # NT programmed only for 6 cycles!
+                            axis = [0, d['md']['cycles'], min_, max_]
                             plt.axis(axis)
                             plt.title(ch + ' for ' + problem + ' for factor=' + fs)
                             lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
                             savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'm%d' % i + '.png', lgd)
-                            axis = [5, 6, min_l, max_l]  # NT programmed only for 6 cycles!
+                            axis = [d['md']['cycles']-1, d['md']['cycles'], min_l, max_l]
                             plt.axis(axis)
                             plt.title(ch + ' for ' + problem + ' for factor=' + fs)
                             lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
