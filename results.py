@@ -521,10 +521,11 @@ class ResultsManager:
         I = Identity(3)  # Identity tensor
         def T(p, v):
             return -p * I + 2.0 * self.nu * sym(grad(v))
-        error_force = assemble(inner(T(pressure-self.sol_p, velocity - self.solution) * normal,
-                                     T(pressure-self.sol_p, velocity - self.solution) * normal) * self.dsWall)
-        analytic_force = assemble(inner(T(self.sol_p, self.solution) * normal, T(self.sol_p, self.solution) * normal) *
-                                  self.dsWall)
+        error_force = math.sqrt(
+                assemble(inner((T(pressure, velocity) - T(self.sol_p, self.solution)) * normal,
+                               (T(pressure, velocity) - T(self.sol_p, self.solution)) * normal) * self.dsWall))
+        analytic_force = math.sqrt(assemble(inner(T(self.sol_p, self.solution) * normal,
+                                                  T(self.sol_p, self.solution) * normal) * self.dsWall))
         self.listDict['a_force_wall']['list'].append(analytic_force)
         self.listDict['force_wall']['list'].append(error_force)
         if self.isWholeSecond:
