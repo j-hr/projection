@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 import problem as prb
+import math
 __author__ = 'jh'
 
 # global variables
@@ -17,8 +18,8 @@ times = {}
 
 color_set = 'Set1'   # e. g. 'Set1', 'Dark2', 'brg', 'jet'
 dpi = 300
-factors = {1: '0.01', 2: '0.05', 3: '0.1', 4: '0.5', 5: '1.0'}
-# factors = {1: '0.01'}
+# factors = {1: '0.01', 2: '0.05', 3: '0.1', 4: '0.5', 5: '1.0'}
+factors = {1: '0.01'}
 meshes = range(1, 4)
 dts = {1: 100, 2: 50, 3: 10, 4: 5, 5: 1}
 dtToSteps = {1: 10, 2: 20, 3: 100, 4: 200, 5: 1000}  # time steps per second
@@ -263,6 +264,11 @@ def create_timelines_plots():
                                 min_l, max_l = minmax(min_l, max_l, min(y[(d['md']['cycles']-1)*dtToSteps[t]:]), max(y[(d['md']['cycles']-1)*dtToSteps[t]:]))
                             if y:
                                 plot_empty = False
+                                plt.subplot(121)
+                                plt.plot(x, y, formats3[i-1], label=problem + (' on mesh %d' % i) + 'with dt=%d ms' % dt_ms,
+                                         color=colors[t-1], lw=line_widths3[i-1])
+                                plt.subplot(122)
+                                plt.yscale('log')
                                 plt.plot(x, y, formats3[i-1], label=problem + (' on mesh %d' % i) + 'with dt=%d ms' % dt_ms,
                                          color=colors[t-1], lw=line_widths3[i-1])
                     if not plot_empty:
@@ -270,18 +276,28 @@ def create_timelines_plots():
                         if ch.endswith('r') and max_ > 10:
                             max_ = 10
                         axis = [0, d['md']['cycles'], min_, max_]
+                        min_log = math.pow(10, math.floor(math.log10(min_)))
+                        plt.subplot(121)
+                        plt.axis(axis)
+                        plt.subplot(122)
+                        axis = [0, d['md']['cycles'], min_log, max_]
                         plt.axis(axis)
                         plt.title(ch + ' for ' + problem + ' for factor=' + fs)
-                        lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
+                        lgd = plt.legend(bbox_to_anchor=(2.5, 1.0))
                         savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + '.png', lgd)
                         # save same plot only for last cycle
                         axis = [d['md']['cycles']-1, d['md']['cycles'], min_l, max_l]
+                        min_log = math.pow(10, math.floor(math.log10(min_l)))
+                        plt.subplot(121)
+                        plt.axis(axis)
+                        plt.subplot(122)
+                        axis = [d['md']['cycles']-1, d['md']['cycles'], min_log, max_l]
                         plt.axis(axis)
                         plt.title(ch + ' for ' + problem + ' for factor=' + fs)
-                        lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
+                        lgd = plt.legend(bbox_to_anchor=(2.5, 1.0))
                         savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'lc.png', lgd)
                     plt.close()
-
+    exit()
     # the same plots, now splitted for meshes
     for ch in plot1:
         if ch in characteristics_timelines:
@@ -310,21 +326,34 @@ def create_timelines_plots():
                                 min_l, max_l = minmax(min_l, max_l, min(y[(d['md']['cycles']-1)*dtToSteps[t]:]), max(y[(d['md']['cycles']-1)*dtToSteps[t]:]))
                             if y:
                                 plot_empty = False
+                                plt.subplot(121)
+                                plt.plot(x, y, '-', label=problem + (' on mesh %d' % i) + 'with dt=%d ms' % dt_ms,
+                                         color=colors[t-1], lw=1.0)
+                                plt.subplot(122)
+                                plt.yscale('log')
                                 plt.plot(x, y, '-', label=problem + (' on mesh %d' % i) + 'with dt=%d ms' % dt_ms,
                                          color=colors[t-1], lw=1.0)
                         if not plot_empty:
+                            plt.subplot(121)
                             plt.xlabel('time')
                             if ch.endswith('r') and max_ > 10:
                                 max_ = 10
                             axis = [0, d['md']['cycles'], min_, max_]
                             plt.axis(axis)
-                            plt.title(ch + ' for ' + problem + ' for factor=' + fs)
-                            lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
-                            savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'm%d' % i + '.png', lgd)
-                            axis = [d['md']['cycles']-1, d['md']['cycles'], min_l, max_l]
+                            plt.subplot(122)
+                            axis = [0, d['md']['cycles'], 0, max_]
                             plt.axis(axis)
                             plt.title(ch + ' for ' + problem + ' for factor=' + fs)
-                            lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
+                            lgd = plt.legend(bbox_to_anchor=(2.5, 1.0))
+                            savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'm%d' % i + '.png', lgd)
+                            axis = [d['md']['cycles']-1, d['md']['cycles'], min_l, max_l]
+                            plt.subplot(121)
+                            plt.axis(axis)
+                            plt.subplot(122)
+                            axis = [d['md']['cycles']-1, d['md']['cycles'], 0, max_l]
+                            plt.axis(axis)
+                            plt.title(ch + ' for ' + problem + ' for factor=' + fs)
+                            lgd = plt.legend(bbox_to_anchor=(2.5, 1.0))
                             savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'm%d' % i + 'lc.png', lgd)
                         plt.close()
 
@@ -348,14 +377,15 @@ load_timelines_data()
 # characteristics = ['time', 'CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'TE_L2r', 'TE_H1r', 'TE_H1wr', 'FEr']
 characteristics = ['time', 'CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'FEr']
 # QQ is it possible to merge characteristics comparison to current code?
-c_plot = {'all': ['IBC_I', 'IBCbI', 'IBCrI', 'IBCRI'],
+c_plot = {'all': problem_list,
           'normal vs no3bc': ['IBC_I', 'IBCbI'],
           'normal vs rotation': ['IBC_I', 'IBCRI'],
           'rotation vs rot+no3bc': ['IBCRI', 'IBCrI']}
 for oneplot in c_plot['all']:
     c_plot[oneplot] = [oneplot]
 
-create_convergence_plots()
+# create_convergence_plots()
+
 # last time characteristics for timelines:
 # 'AVN_L2', 'AVN_H1',
 # 'CE_L2', 'CE_L2s', 'CE_L2n', 'CE_L2r',
@@ -379,7 +409,7 @@ create_convergence_plots()
 # define plots:
 # plot: one parameter, one problem, one factor, 3 meshes, 5 dts
 # plot1 = ['CE_H1r']
-plot1 = ['CE_L2r', 'CE_H1r', 'CE_H1wr', 'FEr', 'PEn']
+plot1 = ['CE_L2r', 'CE_H1r', 'CE_H1wr', 'FEr', 'FE', 'FNE', 'FSEr', 'FSE', 'PEn', 'AF', 'AFN', 'AFS']
 # plot1 = ['CE_L2', 'CE_L2r', 'CE_H1', 'CE_H1r', 'CE_H1w', 'CE_H1wr', 'TE_L2', 'TE_L2r', 'TE_H1', 'TE_H1t', 'TE_H1w',
 #          'TE_H1wr', 'FE', 'FEr', 'PE', 'PEn', 'PGE', 'PGEn',]
 # QQ which to use?  >> let choose shorter set
