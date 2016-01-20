@@ -48,6 +48,9 @@ def load_general_reports():
         if str(item).startswith('last_cycle_') and (str(item).endswith('r') or str(item).endswith('n')):
             characteristics.append(item[11:])
             ch_index[item[11:]] = header.index(item)
+        if str(item).startswith('totalTimeHours'):
+            characteristics.append('time')
+            ch_index['time'] = header.index(item)
     print('Loaded characteristics:', characteristics)
     for line in csvreader:
         # collect names of problems (first five chars of parameter "name")
@@ -107,9 +110,9 @@ def load_timelines_data():
 
 
 # create convergence plots =========================================================================
-# default characteristics: ['CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'TE_L2r', 'TE_H1r', 'TE_H1wr', 'PTEn', 'FEr']
+# default characteristics: ['time', 'CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'TE_L2r', 'TE_H1r', 'TE_H1wr', 'PTEn', 'FEr']
 def create_convergence_plots():
-    formats3 = ['x:', '+--', '1-']
+    formats3 = ['x-.', '+--', '1-']
     line_widths3 = [3.0, 2.0, 1.5]
     formats5 = ['1:', '2:', '3:', 'x:', '+:']
     line_width5 = 3.0
@@ -227,7 +230,7 @@ def create_convergence_plots():
 
 
 def create_timelines_plots():
-    formats3 = [':', '--', '-']
+    formats3 = ['-.', '--', '-']
     line_widths3 = [2.0, 1.5, 1.0]
     for ch in plot1:
         if ch in characteristics_timelines:
@@ -267,13 +270,13 @@ def create_timelines_plots():
                         plt.axis(axis)
                         plt.title(ch + ' for ' + problem + ' for factor=' + fs)
                         lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
-                        savefig('plots/TL1_' + problem + '_' + ch + '_f%d' % f + '.png', lgd)
+                        savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + '.png', lgd)
                         # save same plot only for last cycle
                         axis = [5, 6, min_l, max_l]  # NT programmed only for 6 cycles!
                         plt.axis(axis)
                         plt.title(ch + ' for ' + problem + ' for factor=' + fs)
                         lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
-                        savefig('plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'lc.png', lgd)
+                        savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'lc.png', lgd)
                     plt.close()
 
     # the same plots, now splitted for meshes
@@ -315,12 +318,12 @@ def create_timelines_plots():
                             plt.axis(axis)
                             plt.title(ch + ' for ' + problem + ' for factor=' + fs)
                             lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
-                            savefig('plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'm%d' % i + '.png', lgd)
+                            savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'm%d' % i + '.png', lgd)
                             axis = [5, 6, min_l, max_l]  # NT programmed only for 6 cycles!
                             plt.axis(axis)
                             plt.title(ch + ' for ' + problem + ' for factor=' + fs)
                             lgd = plt.legend(bbox_to_anchor=(1.7, 1.0))
-                            savefig('plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'm%d' % i + 'lc.png', lgd)
+                            savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'm%d' % i + 'lc.png', lgd)
                         plt.close()
 
 
@@ -337,8 +340,12 @@ if not os.path.exists('plots'):
 load_general_reports()
 load_seconds_data()
 load_timelines_data()
-characteristics = ['CE_H1r']
 # define convergence plots
+# TODO compare corrected and tentative velocity
+# TODO compare 'PEn' amd 'PTEn' for rotation schemes
+# characteristics = ['time', 'CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'TE_L2r', 'TE_H1r', 'TE_H1wr', 'FEr']
+characteristics = ['time', 'CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'FEr']
+# QQ is it possible to merge characteristics comparison to current code?
 c_plot = {'all': ['IBC_I', 'IBCbI', 'IBCrI', 'IBCRI'],
           'normal vs no3bc': ['IBC_I', 'IBCbI'],
           'normal vs rotation': ['IBC_I', 'IBCRI'],
@@ -369,8 +376,8 @@ create_convergence_plots()
 
 # define plots:
 # plot: one parameter, one problem, one factor, 3 meshes, 5 dts
-plot1 = ['CE_H1r']
-# plot1 = ['CE_H1r', 'CE_H1wr', 'FEr']
+# plot1 = ['CE_H1r']
+plot1 = ['CE_L2r', 'CE_H1r', 'CE_H1wr', 'FEr', 'PEn']
 # plot1 = ['CE_L2', 'CE_L2r', 'CE_H1', 'CE_H1r', 'CE_H1w', 'CE_H1wr', 'TE_L2', 'TE_L2r', 'TE_H1', 'TE_H1t', 'TE_H1w',
 #          'TE_H1wr', 'FE', 'FEr', 'PE', 'PEn', 'PGE', 'PGEn',]
 # QQ which to use?  >> let choose shorter set
@@ -390,8 +397,6 @@ create_timelines_plots()
 #     empty_plot = True
 #     colors = plt.get_cmap(color_set)(np.linspace(0, 1.0, data_types[type_key][0]))
 #     i = 0
-#     # TODO use less collors using different line types (write function of N to create list of formatstrings and colors)
-#     # TODO colors should respect problem configurations
 #     for data in data_list:
 #         if data[2] == type_key and data[3:]:
 #             # print(data[3:])

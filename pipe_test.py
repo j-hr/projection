@@ -21,6 +21,7 @@ import problem as prb
 #   Mesh name:  cyl_c3      <Mesh of topological dimension 3 (tetrahedra) with 10859 vertices and 53056 cells, ordered>
 #   Mesh norm max:  11.1405707495
 #   Mesh norm min:  0.525851168761
+# NT variant: use 1/3rd root of dim(V) instead of hmin
 
 # Notes
 # characteristic time for onset ~~ length of pipe/speed of fastest particle = 20(mm /factor*1081(mm/s) ~~  0.02 s/factor
@@ -160,7 +161,7 @@ if args.type == "steady":
                        (factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1])))"),
                       t=0, factor=factor)
 else:
-    v_in = womersleyBC.WomersleyProfile(factor)
+    v_in = Function(V)  # IMP
 
 # Initial Conditions====================================================================================================
 if args.type == "pulsePrec":
@@ -643,7 +644,7 @@ if args.method == 'ipcs1':
         rm.update_time(t)
 
         # Update boundary condition
-        v_in.t = t
+        v_in.assign(rm.solution)
 
         # assemble matrix (ir depends on solution)
         tc.start('assembleA1')

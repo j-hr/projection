@@ -88,6 +88,7 @@ class ResultsManager:
         self.dsWall = None
         self.tc.init_watch('assembleSol', 'Assembled analytic solution', True)
         self.tc.init_watch('analyticP', 'Analytic pressure', True)
+        self.tc.init_watch('analyticVnorms', 'Computed analytic velocity norms', True)
         self.tc.init_watch('saveP', 'Saved pressure', True)
         self.tc.init_watch('errorP', 'Computed pressure error', True)
         self.tc.init_watch('errorV', 'Computed velocity error', True)
@@ -104,8 +105,18 @@ class ResultsManager:
         self.coefs_exp = None
 
         self.str_dir_name = None
-        self.doSave = None
+        self.doSave = False
         self.doSaveDiff = False
+        option = self.problem.saveoption
+        if option == 'save' or option == 'diff':
+            self.doSave = True
+            if option == 'diff':
+                self.doSaveDiff = True
+                print('Saving velocity differences.')
+            print('Saving solution ON.')
+        elif option == 'noSave':
+            self.doSave = False
+            print('Saving solution OFF.')
         self.doErrControl = None
         self.testErrControl = False
         self.isSteadyFlow = None
@@ -122,9 +133,9 @@ class ResultsManager:
         self.N0 = 0
         self.N1 = 0
         self.stepsInSecond = None
-        self.last_analytic_velocity_norm_L2 = 0
-        self.last_analytic_velocity_norm_H1 = 0
-        self.last_analytic_velocity_norm_H1w = 0
+        self.analytic_v_norm_L2 = 0
+        self.analytic_v_norm_H1 = 0
+        self.analytic_v_norm_H1w = 0
         self.last_analytic_pressure_norm = 0
         self.vel = None
         self.D = None
@@ -259,20 +270,6 @@ class ResultsManager:
                     Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"), factor=self.factor), solution_space)
                 print("Prepared analytic solution. Time: %f" % (toc() - temp))
 
-    def set_save_mode(self):
-        option = self.problem.saveoption
-        if option == 'save' or option == 'diff':
-            self.doSave = True
-            if option == 'diff':
-                self.doSaveDiff = True
-                print('Saving velocity differences.')
-            print('Saving solution ON.')
-        elif option == 'noSave':
-            self.doSave = False
-            print('Saving solution OFF.')
-        else:
-            exit('Wrong parameter save, should be \"save\", \"noSave\", or \"diff\".')
-
     def set_error_control_mode(self):
         if self.problem.d()['type'] == "steady":
             self.isSteadyFlow = True
@@ -298,7 +295,7 @@ class ResultsManager:
             self.fileDict.update(self.fileDictTent)
             if self.doSaveDiff:
                 self.fileDict.update(self.fileDictTentDiff)
-        if self.problem.d()['hasTentativePressure']:
+        if self.problem.d()['rotation scheme']:
             self.fileDict.update(self.fileDictTentP)
             if self.doSaveDiff:
                 self.fileDict.update(self.fileDictTentPDiff)
@@ -317,9 +314,17 @@ class ResultsManager:
             self.N0 = (seconds-1)*self.stepsInSecond
         else:
             self.isWholeSecond = False
-        self.last_analytic_velocity_norm_L2 = 0
-        self.last_analytic_velocity_norm_H1 = 0
-        self.last_analytic_velocity_norm_H1w = 0
+        if not self.isSteadyFlow:
+            self.solution = self.assemble_solution(self.actual_time)
+            self.tc.start('analyticVnorms')
+            self.analytic_v_norm_L2 = norm(self.solution, norm_type='L2')
+            self.analytic_v_norm_H1 = norm(self.solution, norm_type='H1')
+            self.analytic_v_norm_H1w = sqrt(assemble((inner(grad(self.solution), grad(self.solution)) +
+                                                      inner(self.solution, self.solution)) * self.dsWall))
+            self.listDict['av_norm_L2']['list'].append(self.analytic_v_norm_L2)
+            self.listDict['av_norm_H1']['list'].append(self.analytic_v_norm_H1)
+            self.listDict['av_norm_H1w']['list'].append(self.analytic_v_norm_H1w)
+            self.tc.end('analyticVnorms')
 
     # method for saving divergence (ensuring, that it will be one time line in ParaView)
     def save_div(self, is_tent, field):
@@ -334,9 +339,8 @@ class ResultsManager:
         self.tc.start('saveVel')
         self.vel.assign(field)
         self.fileDict['u2' if is_tent else 'u'][0] << self.vel
-        if self.doSaveDiff:
-            sol = self.assemble_solution(t)
-            self.vel.assign((1.0 / self.vel_normalization_factor[0]) * (field - sol))
+        if self.doSaveDiff and t > 0.0001:
+            self.vel.assign((1.0 / self.vel_normalization_factor[0]) * (field - self.solution))
             self.fileDict['u2D' if is_tent else 'uD'][0] << self.vel
         self.tc.end('saveVel')
 
@@ -484,14 +488,6 @@ class ResultsManager:
                 er_list_L2.append(assemble(inner(velocity - self.solution, velocity - self.solution) * dx))  # faster
                 self.tc.end('errorV')
             else:
-                self.solution = self.assemble_solution(t)   # NT done redundantly twice
-                if self.last_analytic_velocity_norm_L2 == 0:
-                    self.last_analytic_velocity_norm_L2 = norm(self.solution, norm_type='L2')
-                if self.last_analytic_velocity_norm_H1 == 0:
-                    self.last_analytic_velocity_norm_H1 = norm(self.solution, norm_type='H1')
-                if not is_tent:
-                    self.listDict['av_norm_L2']['list'].append(self.last_analytic_velocity_norm_L2)
-                    self.listDict['av_norm_H1']['list'].append(self.last_analytic_velocity_norm_H1)
                 if self.testErrControl:
                     self.tc.start('errorVtest')
                     er_list_test_L2.append(errornorm(velocity, self.solution, norm_type='L2', degree_rise=0))
@@ -503,18 +499,14 @@ class ResultsManager:
                 print('  H1 seminorm error:', sqrt(errorH1seminorm_sq))
                 errorL2 = sqrt(errorL2_sq)
                 errorH1 = sqrt(errorL2_sq + errorH1seminorm_sq)
-                print("  Relative L2 error in velocity = ", errorL2/self.last_analytic_velocity_norm_L2)
-                print("  Relative H1 error in velocity = ", errorH1/self.last_analytic_velocity_norm_H1)
+                print("  Relative L2 error in velocity = ", errorL2 / self.analytic_v_norm_L2)
+                print("  Relative H1 error in velocity = ", errorH1 / self.analytic_v_norm_H1)
                 er_list_L2.append(errorL2)
                 er_list_H1.append(errorH1)
-                if self.last_analytic_velocity_norm_H1w == 0:
-                    self.last_analytic_velocity_norm_H1w = sqrt(assemble((inner(grad(self.solution), grad(self.solution)) + inner(self.solution, self.solution)) * self.dsWall))
-                if not is_tent:
-                    self.listDict['av_norm_H1w']['list'].append(self.last_analytic_velocity_norm_H1w)
                 errorH1wall = sqrt(assemble((inner(grad(velocity - self.solution), grad(velocity - self.solution)) +
                                              inner(velocity - self.solution, velocity - self.solution)) * self.dsWall))
                 er_list_H1w.append(errorH1wall)
-                print('  Relative H1wall error:', errorH1wall/self.last_analytic_velocity_norm_H1w)
+                print('  Relative H1wall error:', errorH1wall / self.analytic_v_norm_H1w)
                 self.tc.end('errorV')
             if self.isWholeSecond:
                 self.listDict['u2L2' if is_tent else 'u_L2']['slist'].append(
