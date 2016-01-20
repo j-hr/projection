@@ -243,7 +243,8 @@ def set_projection_solvers():
     global solver_p, solver_vel, solver_rot, null_space
 
     if args.solvers == 'direct':
-        solver_vel = LUSolver('umfpack')
+        sl = 'mumps' if args.mesh == 'cyl_c3' else 'umfpack'  # umfpack has memory issue for cyl_c3
+        solver_vel = LUSolver(sl)
         solver_p = LUSolver('umfpack')
         if useRotationScheme:
             solver_rot = LUSolver('umfpack')

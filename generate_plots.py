@@ -18,10 +18,11 @@ times = {}
 
 color_set = 'Set1'   # e. g. 'Set1', 'Dark2', 'brg', 'jet'
 dpi = 300
-# factors = {1: '0.01', 2: '0.05', 3: '0.1', 4: '0.5', 5: '1.0'}
-factors = {1: '0.01'}
+factors = range(1, 6)
+f_str = {1: '0.01', 2: '0.05', 3: '0.1', 4: '0.5', 5: '1.0'}
 meshes = range(1, 4)
-dts = {1: 100, 2: 50, 3: 10, 4: 5, 5: 1}
+dts = range(1, 6)
+dtToMs = {1: 100, 2: 50, 3: 10, 4: 5, 5: 1}
 dtToSteps = {1: 10, 2: 20, 3: 100, 4: 200, 5: 1000}  # time steps per second
 
 
@@ -98,7 +99,7 @@ def load_timelines_data():
         try:
             line = next(csvreader)
             times[i] = [float(x) for x in line[3:]]
-            print(times[i])
+            # print(times[i])
             for line in csvreader:
                 data_place = problems[line[0][0:5]][line[0]]
                 data_list = [float(x) for x in line[3:]]
@@ -126,8 +127,8 @@ def create_convergence_plots():
     for ch in characteristics:
         # CHARACTERISTIC/DT
         print('Convergence in time:', ch)
-        for (f, fs) in factors.iteritems():
-            print('  f =', fs)
+        for f in factors:
+            print('  f =', f_str[f])
             # create figures and subplot instances
             plots = {}
             fig_idx = 1
@@ -144,14 +145,14 @@ def create_convergence_plots():
                 for i in meshes:
                     x = []
                     y = []
-                    for (t, dt_ms) in dts.iteritems():
+                    for t in dts:
                         name = problem + ('%d%d%d' % (f, i, t))
                         if name in problems[problem]:
                             d = problems[problem][name]
                             value = d['report'][ch_index[ch]]
                             if value < 1e12:  # do not plot values from diverging problems
                                 y.append(value)
-                                x.append(dt_ms)
+                                x.append(dtToMs[t])
                     if y and sum(y) > 0:
                         print('      ', ch, ' on mesh ', i, x, y)
                         for (plot_name, plot) in plots.iteritems():
@@ -171,7 +172,7 @@ def create_convergence_plots():
                     axis = axes.axis()
                     axis = [105, 0.95, axis[2], axis[3]]
                     axes.axis(axis)
-                    axes.set_title(plot_name + ' ' + ch + ' for factor=' + fs)
+                    axes.set_title(plot_name + ' ' + ch + ' for factor=' + f_str[f])
                     lgd = axes.legend(bbox_to_anchor=(1.5, 1.0))
                     savefig(plot['fig'], 'plots/C_' + plot_name + '_' + ch + '_f%d' % f + '_CT.png', lgd)
             for idx in range(1, fig_idx):
@@ -179,8 +180,8 @@ def create_convergence_plots():
                 plt.close()
         # CHARACTERISTIC/H
         print('Convergence in space:', ch)
-        for (f, fs) in factors.iteritems():
-            print('  f =', fs)
+        for f in factors:
+            print('  f =', f_str[f])
             # create figures and subplot instances
             plots = {}
             fig_idx = 1
@@ -194,7 +195,7 @@ def create_convergence_plots():
 
             for problem in problems.iterkeys():
                 print('    problem =', problem)
-                for (t, dt_ms) in dts.iteritems():
+                for t in dts:
                     x = []
                     y = []
                     for i in meshes:
@@ -206,13 +207,13 @@ def create_convergence_plots():
                                 y.append(value)
                                 x.append(d['md']['h'])
                     if y and sum(y) > 0:
-                        print('        ', ch, ' dt: ', dt_ms, x, y)
+                        print('        ', ch, ' dt: ', dtToMs[t], x, y)
                         for (plot_name, plot) in plots.iteritems():
                             if problem in plot['set']:
                                 plot['empty'] = False
                                 idx = plot['set'].index(problem)
                                 rng = len(plot['set'])
-                                plot['spl'].plot(x, y, formats5[t-1], label=problem + (' with dt %d' % dt_ms),
+                                plot['spl'].plot(x, y, formats5[t-1], label=problem + (' with dt %d' % dtToMs[t]),
                                                  color=color(idx, rng), lw=line_width5, ms=marker_size,
                                                  mew=marker_edge_width)
             for (plot_name, plot) in plots.iteritems():
@@ -226,7 +227,7 @@ def create_convergence_plots():
                     axes.axis(axis)
                     axes.set_xticks([2.0, 1.0, 0.5])
                     axes.set_xticklabels(['2.0', '1.0', '0.5'])
-                    axes.set_title(plot_name + ' ' + ch + ' for factor=' + fs)
+                    axes.set_title(plot_name + ' ' + ch + ' for factor=' + f_str[f])
                     lgd = axes.legend(bbox_to_anchor=(1.5, 1.0))
                     savefig(plot['fig'], 'plots/C_' + plot_name + '_' + ch + '_f%d' % f + '_CS.png', lgd)
             for idx in range(1, fig_idx):
@@ -235,127 +236,63 @@ def create_convergence_plots():
 
 
 def create_timelines_plots():
-    formats3 = ['-.', '--', '-']
-    line_widths3 = [2.0, 1.5, 1.0]
-    for ch in plot1:
-        if ch in characteristics_timelines:
-            print(ch)
-            for (f, fs) in factors.iteritems():
-                print('  f =', fs)
-                for problem in problems.iterkeys():
-                    print('    problem =', problem)
-                    plot_empty = True
-                    colors = plt.get_cmap(color_set)(np.linspace(0, 1.0, 5))
-                    max_ = 0
-                    min_ = 1e16
-                    max_l = 0
-                    min_l = 1e16
-                    for i in meshes:
-                        for (t, dt_ms) in dts.iteritems():
-                            name = problem + ('%d%d%d' % (f, i, t))
-                            x = []
-                            y = []
-                            if name in problems[problem]:
-                                d = problems[problem][name]
+    formats = {2: ['--', '-'],
+               3: ['-.', '--', '-']}
+    line_widths = {2: [1.5, 1.0],
+                   3: [2.0, 1.5, 1.0]}
+    for (plot_name, plot) in t_plots.iteritems():
+        print(plot_name)
+        fig = plt.figure(1)
+        s1 = fig.add_subplot('121')
+        s2 = fig.add_subplot('122')
+        plot_empty = True
+        max_ = -1e16
+        min_ = 1e16
+        max_l = -1e16
+        min_l = 1e16
+        for ch in plot['characteristics']:
+            for prb in plot['problems']:
+                for f in plot['factors']:
+                    for t in plot['times']:
+                        for m in plot['meshes']:
+                            indices = {'meshes': m-1, 'times': t-1, 'problems': plot['problems'].index(prb),
+                                       'characteristics': plot['characteristics'].index(ch)}
+                            name = prb + ('%d%d%d' % (f, m, t))
+                            print('  Looking for:', name)
+                            if name in problems[prb]:
+                                print('    Found!')
+                                d = problems[prb][name]
                                 y = d['timelines'][ch]
                                 x = times[t]
-                                print('      ' + name + ' data sizes (x, y):', len(x), len(y), 'expected', d['md']['cycles']*dtToSteps[t])
                                 min_, max_ = minmax(min_, max_, min(y[dtToSteps[t]:]), max(y[dtToSteps[t]:]))
                                 min_l, max_l = minmax(min_l, max_l, min(y[(d['md']['cycles']-1)*dtToSteps[t]:]), max(y[(d['md']['cycles']-1)*dtToSteps[t]:]))
-                            if y:
                                 plot_empty = False
-                                plt.subplot(121)
-                                plt.plot(x, y, formats3[i-1], label=problem + (' on mesh %d' % i) + 'with dt=%d ms' % dt_ms,
-                                         color=colors[t-1], lw=line_widths3[i-1])
-                                plt.subplot(122)
-                                plt.yscale('log')
-                                plt.plot(x, y, formats3[i-1], label=problem + (' on mesh %d' % i) + 'with dt=%d ms' % dt_ms,
-                                         color=colors[t-1], lw=line_widths3[i-1])
-                    if not plot_empty:
-                        plt.xlabel('time')
-                        if ch.endswith('r') and max_ > 10:
-                            max_ = 10
-                        axis = [0, d['md']['cycles'], min_, max_]
-                        min_log = math.pow(10, math.floor(math.log10(min_)))
-                        plt.subplot(121)
-                        plt.axis(axis)
-                        plt.subplot(122)
-                        axis = [0, d['md']['cycles'], min_log, max_]
-                        plt.axis(axis)
-                        plt.title(ch + ' for ' + problem + ' for factor=' + fs)
-                        lgd = plt.legend(bbox_to_anchor=(2.5, 1.0))
-                        savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + '.png', lgd)
-                        # save same plot only for last cycle
-                        axis = [d['md']['cycles']-1, d['md']['cycles'], min_l, max_l]
-                        min_log = math.pow(10, math.floor(math.log10(min_l)))
-                        plt.subplot(121)
-                        plt.axis(axis)
-                        plt.subplot(122)
-                        axis = [d['md']['cycles']-1, d['md']['cycles'], min_log, max_l]
-                        plt.axis(axis)
-                        plt.title(ch + ' for ' + problem + ' for factor=' + fs)
-                        lgd = plt.legend(bbox_to_anchor=(2.5, 1.0))
-                        savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'lc.png', lgd)
-                    plt.close()
-    exit()
-    # the same plots, now splitted for meshes
-    for ch in plot1:
-        if ch in characteristics_timelines:
-            print(ch)
-            for (f, fs) in factors.iteritems():
-                print('  f =', fs)
-                for problem in problems.iterkeys():
-                    print('    problem =', problem)
-                    for i in meshes:
-                        plot_empty = True
-                        colors = plt.get_cmap(color_set)(np.linspace(0, 1.0, 5))
-                        max_ = 0
-                        min_ = 1e16
-                        max_l = 0
-                        min_l = 1e16
-                        for (t, dt_ms) in dts.iteritems():
-                            name = problem + ('%d%d%d' % (f, i, t))
-                            x = []
-                            y = []
-                            if name in problems[problem]:
-                                d = problems[problem][name]
-                                y = d['timelines'][ch]
-                                x = times[t]
-                                print('      ' + name + ' data sizes (x, y):', len(x), len(y), 'expected', d['md']['cycles']*dtToSteps[t])
-                                min_, max_ = minmax(min_, max_, min(y[dtToSteps[t]:]), max(y[dtToSteps[t]:]))
-                                min_l, max_l = minmax(min_l, max_l, min(y[(d['md']['cycles']-1)*dtToSteps[t]:]), max(y[(d['md']['cycles']-1)*dtToSteps[t]:]))
-                            if y:
-                                plot_empty = False
-                                plt.subplot(121)
-                                plt.plot(x, y, '-', label=problem + (' on mesh %d' % i) + 'with dt=%d ms' % dt_ms,
-                                         color=colors[t-1], lw=1.0)
-                                plt.subplot(122)
-                                plt.yscale('log')
-                                plt.plot(x, y, '-', label=problem + (' on mesh %d' % i) + 'with dt=%d ms' % dt_ms,
-                                         color=colors[t-1], lw=1.0)
-                        if not plot_empty:
-                            plt.subplot(121)
-                            plt.xlabel('time')
-                            if ch.endswith('r') and max_ > 10:
-                                max_ = 10
-                            axis = [0, d['md']['cycles'], min_, max_]
-                            plt.axis(axis)
-                            plt.subplot(122)
-                            axis = [0, d['md']['cycles'], 0, max_]
-                            plt.axis(axis)
-                            plt.title(ch + ' for ' + problem + ' for factor=' + fs)
-                            lgd = plt.legend(bbox_to_anchor=(2.5, 1.0))
-                            savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'm%d' % i + '.png', lgd)
-                            axis = [d['md']['cycles']-1, d['md']['cycles'], min_l, max_l]
-                            plt.subplot(121)
-                            plt.axis(axis)
-                            plt.subplot(122)
-                            axis = [d['md']['cycles']-1, d['md']['cycles'], 0, max_l]
-                            plt.axis(axis)
-                            plt.title(ch + ' for ' + problem + ' for factor=' + fs)
-                            lgd = plt.legend(bbox_to_anchor=(2.5, 1.0))
-                            savefig(plt.gcf(), 'plots/TL1_' + problem + '_' + ch + '_f%d' % f + 'm%d' % i + 'lc.png', lgd)
-                        plt.close()
+                                s2.set_yscale('log')
+                                for s in [s1, s2]:
+                                    s.plot(x, y, formats[len(plot[plot['formats']])][indices[plot['formats']]],
+                                           label=plot['label'](prb, f, ch, m, t),
+                                           color=color(indices[plot['colors']], len(plot[plot['colors']])),
+                                           lw=line_widths[len(plot[plot['formats']])][indices[plot['formats']]])
+        if not plot_empty:
+            print('  Plotting')
+            for s in [s1, s2]:
+                s.set_xlabel('time')
+                s.set_xlim(0, d['md']['cycles'])
+            min_log = math.pow(10, math.floor(math.log10(min_)))
+            s1.set_ylim(min_, max_)
+            s2.set_ylim(min_log, max_)
+            s2.set_title(plot_name + ' for factor=' + f_str[f])
+            lgd = plt.legend(bbox_to_anchor=(1.0 + plot['legend size'], 1.0))
+            savefig(plt.gcf(), 'plots/TL_' + plot_name + '_f%d' % f + '.png', lgd)
+            # save same plot only for last cycle
+            for s in [s1, s2]:
+                s.set_xlabel('time (last cycle)')
+                s.set_xlim((d['md']['cycles']-1), d['md']['cycles'])
+            min_log = math.pow(10, math.floor(math.log10(min_l)))
+            s1.set_ylim(min_l, max_l)
+            s2.set_ylim(min_log, max_l)
+            savefig(plt.gcf(), 'plots/TL_' + plot_name + '_f%d' % f + 'lc.png', lgd)
+        plt.close()
 
 
 # MAIN code ========================================================================================
@@ -384,7 +321,7 @@ c_plot = {'all': problem_list,
 for oneplot in c_plot['all']:
     c_plot[oneplot] = [oneplot]
 
-# create_convergence_plots()
+create_convergence_plots()
 
 # last time characteristics for timelines:
 # 'AVN_L2', 'AVN_H1',
@@ -407,15 +344,56 @@ for oneplot in c_plot['all']:
 # 'AVN_H1w'
 
 # define plots:
-# plot: one parameter, one problem, one factor, 3 meshes, 5 dts
+# plot: one parameter, one problem, one factor, 3 or 1 meshes, 5 dts
 # plot1 = ['CE_H1r']
-plot1 = ['CE_L2r', 'CE_H1r', 'CE_H1wr', 'FEr', 'FE', 'FNE', 'FSEr', 'FSE', 'PEn', 'AF', 'AFN', 'AFS']
+t_plots = {}
+plot1 = ['CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn']
 # plot1 = ['CE_L2', 'CE_L2r', 'CE_H1', 'CE_H1r', 'CE_H1w', 'CE_H1wr', 'TE_L2', 'TE_L2r', 'TE_H1', 'TE_H1t', 'TE_H1w',
 #          'TE_H1wr', 'FE', 'FEr', 'PE', 'PEn', 'PGE', 'PGEn',]
+for problem in problem_list:
+    for f in [1]:
+        for char in plot1:
+            name = problem + ' ' + char
+            t_plots[name] = {}
+            t_plots[name]['characteristics'] = [char]
+            t_plots[name]['times'] = dts
+            t_plots[name]['problems'] = [problem]
+            t_plots[name]['meshes'] = meshes
+            t_plots[name]['factors'] = [f]
+            t_plots[name]['colors'] = 'times'
+            t_plots[name]['formats'] = 'meshes'
+            t_plots[name]['label'] = lambda prb, f, ch, m, t: '%d on mesh %d' % (dtToMs[t], m)
+            t_plots[name]['legend size'] = 1.0
 # QQ which to use?  >> let choose shorter set
 # same plot with analytic value
 plot2 = {'PG': 'APG'}  # NT: iplement ad hoc, does nothing
 # QQ other plots?
+# plot: compare more parameters, one problem, one factor, 1 mesh, 5 dts
+compare_params = {'velocity error norms': ['CE_L2r', 'CE_H1r'],
+                  'velocity error norms 2': ['CE_L2r', 'CE_H1r', 'CE_H1wr'],
+                  'tentative vs corected H1': ['TE_H1r', 'CE_H1r'],
+                  'tentative vs corected H1 wall': ['TE_H1wr', 'CE_H1wr'],
+                  'force error composition': ['FNE', 'FSE', 'FE'],
+                  'force error relative composition': ['FNEr', 'FSEr', 'FEr'],
+                  }
+for problem in problem_list:
+    for f in [1]:
+        for m in meshes:
+            for (plot_name, params) in compare_params.iteritems():
+                name = problem + ' ' + plot_name + ' on mesh %d ' % m + 'f = ' + f_str[f]
+                t_plots[name] = {}
+                t_plots[name]['characteristics'] = params
+                t_plots[name]['times'] = dts
+                t_plots[name]['problems'] = [problem]
+                t_plots[name]['meshes'] = [m]
+                t_plots[name]['factors'] = [f]
+                t_plots[name]['colors'] = 'times'
+                t_plots[name]['formats'] = 'characteristics'
+                t_plots[name]['label'] = lambda prb, f, ch, m, t: '%s %d' % (ch, dtToMs[t])
+                t_plots[name]['legend size'] = 1.0
+
+# TODO plot: compare more problems, one problem, one factor, 1 mesh, 5 dts
+
 create_timelines_plots()
 
 
