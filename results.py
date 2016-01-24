@@ -12,6 +12,7 @@ class TimeControl:
     def __init__(self):
         # watch is list [total_time, last_start, message_when_measured]
         self.watches = {}
+        self.last_measurement = 0
         tic()
 
     def init_watch(self, what, message, count_to_sum):
@@ -21,12 +22,16 @@ class TimeControl:
     def start(self, what):
         if what in self.watches:
             self.watches[what][1] = toc()
+            from_last = toc()-self.last_measurement
+            if from_last > 0.1:
+                print('TC (%s): time from last end of measurement:' % what, from_last)
 
     def end(self, what):
         watch = self.watches[what]
         elapsed = toc() - watch[1]
         watch[0] += elapsed
         print(watch[2]+'. Time: %.4f Total: %.4f' % (elapsed, watch[0]))
+        self.last_measurement = toc()
 
     def report(self, report_file, str_name):
         total_time = toc()
@@ -78,6 +83,9 @@ class ResultsManager:
     def __init__(self, problem, time_control):
         self.problem = problem
 
+        # stopping criteria (for relative H1 velocity error norm)
+        self.divergence_treshold = 10
+
         # fixed parameters (used in analytic solution and in BC)
         self.nu = 3.71  # kinematic viscosity
         self.R = 5.0  # cylinder radius
@@ -97,6 +105,7 @@ class ResultsManager:
         self.tc.init_watch('div', 'Computed and saved divergence', True)
         self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
         self.tc.init_watch('saveVel', 'Saved velocity', True)
+        self.tc.init_watch('status', 'Reported status.', True)
 
         # partial Bessel functions and coefficients
         self.bessel_parabolic = None
@@ -137,6 +146,7 @@ class ResultsManager:
         self.analytic_v_norm_H1 = 0
         self.analytic_v_norm_H1w = 0
         self.last_analytic_pressure_norm = 0
+        self.last_error = 0
         self.vel = None
         self.D = None
         self.divFunction = None
@@ -311,6 +321,7 @@ class ResultsManager:
 
     def update_time(self, actual_time):
         self.actual_time = round(actual_time, 3)
+        self.write_status_file(self.actual_time)
         self.time_list.append(self.actual_time)  # round time step to 0.001
         if self.actual_time > 0.5 and int(round(self.actual_time * 1000)) % 1000 == 0:
             self.isWholeSecond = True
@@ -393,6 +404,14 @@ class ResultsManager:
                     sqrt(sum([i*i for i in self.listDict[key]['list'][self.N0:self.N1]])/self.stepsInSecond))
         self.tc.end('errorP')
 
+    def report_divergence(self, t):
+        f = open(self.problem.d()['name'] + "_factor%4.2f_step_%dms_failed_at_%5.3f.report" %
+                 (self.factor, self.problem.d()['dt_ms'], t), "w")
+        f.write('STOPPED: Relative error too big!')
+        f.close()
+        self.remove_status_file()
+        exit('STOPPING: Relative error too big!')
+
     def report_fail(self, t):
         print("Runtime error:", sys.exc_info()[1])
         print("Traceback:")
@@ -401,6 +420,18 @@ class ResultsManager:
                  (self.factor, self.problem.d()['dt_ms'], t), "w")
         f.write(traceback.format_exc())
         f.close()
+        self.remove_status_file()
+
+    def write_status_file(self, t):
+        self.tc.start('status')
+        f = open(self.problem.d()['name'] + ".run", "w")
+        progress = t/self.problem.d()['cycles']
+        f.write('t = %5.3f\nprogress = %3.0f %%\nlast error = %5.3f' % (t, 100*progress, self.last_error))
+        f.close()
+        self.tc.end('status')
+
+    def remove_status_file(self):
+        os.remove(self.problem.d()['name'] + ".run")
 
     def compute_div(self, is_tent, velocity):
         self.tc.start('divNorm')
@@ -506,7 +537,8 @@ class ResultsManager:
                 errorL2 = sqrt(errorL2_sq)
                 errorH1 = sqrt(errorL2_sq + errorH1seminorm_sq)
                 print("  Relative L2 error in velocity = ", errorL2 / self.analytic_v_norm_L2)
-                print("  Relative H1 error in velocity = ", errorH1 / self.analytic_v_norm_H1)
+                self.last_error = errorH1 / self.analytic_v_norm_H1
+                print("  Relative H1 error in velocity = ", self.last_error)
                 er_list_L2.append(errorL2)
                 er_list_H1.append(errorH1)
                 errorH1wall = sqrt(assemble((inner(grad(velocity - self.solution), grad(velocity - self.solution)) +
@@ -521,6 +553,9 @@ class ResultsManager:
                     math.sqrt(sum([i*i for i in er_list_H1[self.N0:self.N1]])/self.stepsInSecond))
                 self.listDict['u2H1w' if is_tent else 'u_H1w']['slist'].append(
                     math.sqrt(sum([i*i for i in er_list_H1w[self.N0:self.N1]])/self.stepsInSecond))
+            # stopping criteria
+            if self.last_error > self.divergence_treshold:
+                self.report_divergence(t)
 
     def compute_force(self, velocity, pressure, normal, t):
         self.tc.start('errorForce')
@@ -559,6 +594,7 @@ class ResultsManager:
 
 # Reports ==============================================================================================================
     def report(self, ):
+        self.remove_status_file()
         total = toc()
         pd = self.problem.d()
 

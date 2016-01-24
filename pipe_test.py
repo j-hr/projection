@@ -34,15 +34,20 @@ import problem as prb
 tc = results.TimeControl()
 tc.init_watch('init', 'Initialization', True)
 tc.init_watch('rhs', 'Assembled right hand side', True)
+tc.init_watch('updateBC', 'Updated velocity BC', True)
 tc.init_watch('applybc1', 'Applied velocity BC 1st step', True)
 tc.init_watch('applybc3', 'Applied velocity BC 3rd step', True)
 tc.init_watch('applybcP', 'Applied pressure BC or othogonalized rhs', True)
+tc.init_watch('averageP', 'Averaged pressure', True)
 tc.init_watch('assembleMatrices', 'Initial matrix assembly', False)
 tc.init_watch('solve 1', 'Running solver on 1st step', True)
 tc.init_watch('solve 2', 'Running solver on 2nd step', True)
 tc.init_watch('solve 3', 'Running solver on 3rd step', True)
 tc.init_watch('solve 4', 'Running solver on 4th step', True)
 tc.init_watch('assembleA1', 'Assembled A1 matrix', True)
+tc.init_watch('computePG', 'Computed pressure gradient', True)
+tc.init_watch('next', 'Next step assignments', True)
+
 tc.start('init')
 if not has_linear_algebra_backend("PETSc"):
     info("DOLFIN has not been configured with PETSc. Exiting.")
@@ -211,15 +216,18 @@ rm.initialize(V, Q, mesh, "%sresults_%s_%s_%s_%s_factor%4.2f_%ds_%dms" %
 
 
 def averaging_pressure(pressure):
+    tc.start('averageP')
     # averaging pressure (substract average)
     p_average = assemble((1.0/volume) * pressure * dx)
     # print('Average pressure: ', p_average)
     p_average_function = interpolate(Expression("p", p=p_average), Q)
     # print(p_average_function, pressure, pressure_Q)
     pressure.assign(pressure - p_average_function)
+    tc.end('averageP')
 
 
 def save_pressure(is_tent, pressure):
+    tc.start('computePG')
     # Report pressure gradient
     p_in = assemble((1.0/area) * pressure * dsIn)
     p_out = assemble((1.0/area) * pressure * dsOut)
@@ -227,6 +235,7 @@ def save_pressure(is_tent, pressure):
     p_diff = (p_out - p_in)/20.0  # 20.0 is a length of a pipe
     # plot(pressure, interactive=True)
     # exit()
+    tc.end('computePG')
     rm.save_pressure(is_tent, pressure, p_diff)
 
 
@@ -646,7 +655,9 @@ if args.method == 'ipcs1':
         rm.update_time(t)
 
         # Update boundary condition
+        tc.start('updateBC')
         v_in.assign(rm.solution)
+        tc.end('updateBC')
 
         # assemble matrix (ir depends on solution)
         tc.start('assembleA1')
@@ -764,6 +775,7 @@ if args.method == 'ipcs1':
         rm.compute_force(u_cor, p_mod if useRotationScheme else (pQ if args.bc == 'lagrange' else p_), n, t)  # NT clean somehow?
 
         # Move to next time step
+        tc.start('next')
         u1.assign(u0)
         u0.assign(u_cor)
         if useRotationScheme:
@@ -775,6 +787,7 @@ if args.method == 'ipcs1':
                 p0.assign(p_)
 
         t += dt
+        tc.end('next')
 
     info("Finished: Incremental pressure correction scheme n. 1")
 
