@@ -118,128 +118,104 @@ def load_timelines_data():
 # create convergence plots =========================================================================
 # default characteristics: ['time', 'CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'TE_L2r', 'TE_H1r', 'TE_H1wr', 'PTEn', 'FEr']
 def create_convergence_plots():
-    formats3 = ['x-.', '+--', '1-']
-    line_widths3 = [3.0, 2.0, 1.5]
-    formats5 = ['1:', '2:', '3:', 'x:', '+:']
-    line_width5 = 3.0
+    formats3 = [['x-.', '+--', '1-'],
+                ['+-.', 'x--', '2-']]
+    line_widths3 = [2.0, 1.5, 1.0]
+    formats5 = ['1-', '2-', '3-', 'x-', '+-']
+    line_width5 = 1.0
     marker_size = 10.0
     marker_edge_width = 2.0
-    for ch in characteristics:
-        # CHARACTERISTIC/DT
-        print('Convergence in time:', ch)
-        for f in factors:
-            print('  f =', f_str[f])
-            # create figures and subplot instances
-            plots = {}
-            fig_idx = 1
-            for (plot_name, plot_set) in c_plot.iteritems():
-                plots[plot_name] = {}
-                plots[plot_name]['fig'] = plt.figure(fig_idx)
-                plots[plot_name]['spl'] = plots[plot_name]['fig'].add_subplot('111')
-                plots[plot_name]['set'] = plot_set
-                plots[plot_name]['empty'] = True
-                fig_idx += 1
-
-            for problem in problems.iterkeys():
-                print('    problem =', problem)
-                for i in meshes:
-                    x = []
-                    y = []
+    for (plot_name, plot) in c_plots.iteritems():
+        print(plot_name)
+        figT = plt.figure(1)
+        figS = plt.figure(2)
+        splT = figT.add_subplot('111')
+        splS = figS.add_subplot('111')
+        plot_empty = True
+        max_ = -1e16
+        min_ = 1e16
+        for ch in plot['characteristics']:
+            max_plotted_value = 10 if str(ch).endswith('r') else 1e10
+            for prb in plot['problems']:
+                indices = {'problems': prb, 'characteristics': ch}
+                for f in plot['factors']:
+                    for m in meshes:
+                        Tvalues = []
+                        Tx = []
+                        for t in dts:
+                            name = prb + ('%d%d%d' % (f, m, t))
+                            print('  Looking for:', name)
+                            if name in problems[prb]:
+                                print('    Found!')
+                                d = problems[prb][name]
+                                value = d['report'][ch_index[ch]]
+                                if 0 < value < max_plotted_value:  # do not plot values 0 and from diverging problems
+                                    Tvalues.append(value)
+                                    Tx.append(dtToMs[t])
+                                    min_, max_ = minmax(min_, max_, value, value)
+                        if Tvalues:
+                            plot_empty = False
+                            idx = plot[plot['colors']].index(indices[plot['colors']])
+                            rng = len(plot[plot['colors']])
+                            splT.plot(Tx, Tvalues, formats3[idx % 2][m-1], lw=line_widths3[m-1],
+                                      label=plot['label'](prb, f, ch, m, t) + ' on mesh %d' % m, color=color(idx, rng),
+                                      ms=marker_size, mew=marker_edge_width)
                     for t in dts:
-                        name = problem + ('%d%d%d' % (f, i, t))
-                        if name in problems[problem]:
-                            d = problems[problem][name]
-                            value = d['report'][ch_index[ch]]
-                            if value < 1e12:  # do not plot values from diverging problems
-                                y.append(value)
-                                x.append(dtToMs[t])
-                    if y and sum(y) > 0:
-                        print('      ', ch, ' on mesh ', i, x, y)
-                        for (plot_name, plot) in plots.iteritems():
-                            if problem in plot['set']:
-                                plot['empty'] = False
-                                idx = plot['set'].index(problem)
-                                rng = len(plot['set'])
-                                plot['spl'].plot(x, y, formats3[i-1], label=problem + (' on mesh %d' % i),
-                                                 color=color(idx, rng), lw=line_widths3[i - 1], ms=marker_size,
-                                                 mew=marker_edge_width)
-            for (plot_name, plot) in plots.iteritems():
-                if not plot['empty']:
-                    axes = plot['fig'].axes[0]
-                    plot['spl'].set_xlabel('dt in ms')
-                    axes.set_xscale('log')
-                    axes.set_yscale('log')
-                    axis = axes.axis()
-                    axis = [105, 0.95, axis[2], axis[3]]
-                    axes.axis(axis)
-                    axes.set_title(plot_name + ' ' + ch + ' for factor=' + f_str[f])
-                    lgd = axes.legend(bbox_to_anchor=(1.5, 1.0))
-                    savefig(plot['fig'], 'plots/C_' + plot_name + '_' + ch + '_f%d' % f + '_CT.png', lgd)
-            for idx in range(1, fig_idx):
-                plt.figure(idx)
-                plt.close()
-        # CHARACTERISTIC/H
-        print('Convergence in space:', ch)
-        for f in factors:
-            print('  f =', f_str[f])
-            # create figures and subplot instances
-            plots = {}
-            fig_idx = 1
-            for (plot_name, plot_set) in c_plot.iteritems():
-                plots[plot_name] = {}
-                plots[plot_name]['fig'] = plt.figure(fig_idx)
-                plots[plot_name]['spl'] = plots[plot_name]['fig'].add_subplot('111')
-                plots[plot_name]['set'] = plot_set
-                plots[plot_name]['empty'] = True
-                fig_idx += 1
+                        Svalues = []
+                        Sx = []
+                        for m in meshes:
+                            name = prb + ('%d%d%d' % (f, m, t))
+                            print('  Looking for:', name)
+                            if name in problems[prb]:
+                                print('    Found!')
+                                d = problems[prb][name]
+                                value = d['report'][ch_index[ch]]
+                                if 0 < value < max_plotted_value:  # do not plot values 0 and from diverging problems
+                                    Svalues.append(value)
+                                    Sx.append(d['md']['h'])
+                        if Svalues:
+                            idx = plot[plot['colors']].index(indices[plot['colors']])
+                            rng = len(plot[plot['colors']])
+                            splS.plot(Sx, Svalues, formats5[t-1], lw=line_width5,
+                                      label=plot['label'](prb, f, ch, m, t) + ' with dt=%d' % dtToMs[t],
+                                      color=color(idx, rng), ms=marker_size, mew=marker_edge_width)
+        if not plot_empty:
+            print('  Plotting')
+            for a in [figT.axes[0], figS.axes[0]]:
+                a.set_title(plot_name)
+                a.set_xscale('log')
+                a.set_yscale('log')
+                a.set_ylim(min_*0.95, max_*1.05)
 
-            for problem in problems.iterkeys():
-                print('    problem =', problem)
-                for t in dts:
-                    x = []
-                    y = []
-                    for i in meshes:
-                        name = problem + ('%d%d%d' % (f, i, t))
-                        if name in problems[problem]:
-                            d = problems[problem][name]
-                            value = d['report'][ch_index[ch]]
-                            if value < 1e12:  # do not plot values from diverging problems
-                                y.append(value)
-                                x.append(d['md']['h'])
-                    if y and sum(y) > 0:
-                        print('        ', ch, ' dt: ', dtToMs[t], x, y)
-                        for (plot_name, plot) in plots.iteritems():
-                            if problem in plot['set']:
-                                plot['empty'] = False
-                                idx = plot['set'].index(problem)
-                                rng = len(plot['set'])
-                                plot['spl'].plot(x, y, formats5[t-1], label=problem + (' with dt %d' % dtToMs[t]),
-                                                 color=color(idx, rng), lw=line_width5, ms=marker_size,
-                                                 mew=marker_edge_width)
-            for (plot_name, plot) in plots.iteritems():
-                if not plot['empty']:
-                    axes = plot['fig'].axes[0]
-                    plot['spl'].set_xlabel('h')
-                    axes.set_xscale('log')
-                    axes.set_yscale('log')
-                    axis = axes.axis()
-                    axis = [2.3, 0.5, axis[2], axis[3]]
-                    axes.axis(axis)
-                    axes.set_xticks([2.0, 1.0, 0.5])
-                    axes.set_xticklabels(['2.0', '1.0', '0.5'])
-                    axes.set_title(plot_name + ' ' + ch + ' for factor=' + f_str[f])
-                    lgd = axes.legend(bbox_to_anchor=(1.5, 1.0))
-                    savefig(plot['fig'], 'plots/C_' + plot_name + '_' + ch + '_f%d' % f + '_CS.png', lgd)
-            for idx in range(1, fig_idx):
-                plt.figure(idx)
-                plt.close()
+            axesT = figT.axes[0]
+            splT.set_xlabel('dt in ms')
+            splT.set_xlim(100.5, 0.95)
+            lgdT = axesT.legend(bbox_to_anchor=(1.5, 1.0))
+            savefig(figT, 'plots/C_' + plot_name + '_CT.png', lgdT)
+
+            axesS = figS.axes[0]
+            splS.set_xlabel('h')
+            splS.set_xlim(2.3, 0.5)
+            axesS.set_xticks([2.0, 1.0, 0.5])
+            axesS.set_xticklabels(['2.0', '1.0', '0.5'])
+            lgdS = axesS.legend(bbox_to_anchor=(1.5, 1.0))
+            savefig(figS, 'plots/C_' + plot_name + '_CS.png', lgdS)
+
+        plt.figure(1)
+        plt.close()
+        plt.figure(2)
+        plt.close()
 
 
 def create_timelines_plots():
     formats = {2: ['--', '-'],
-               3: ['-.', '--', '-']}
+               3: ['-.', '--', '-'],
+               4: [':', '-.', '--', '-']
+               }
     line_widths = {2: [1.5, 1.0],
-                   3: [2.0, 1.5, 1.0]}
+                   3: [2.0, 1.5, 1.0],
+                   4: [2.5, 2.0, 1.5, 1.0]
+                   }
     for (plot_name, plot) in t_plots.iteritems():
         print(plot_name)
         fig = plt.figure(1)
@@ -259,7 +235,7 @@ def create_timelines_plots():
                                        'characteristics': plot['characteristics'].index(ch)}
                             name = prb + ('%d%d%d' % (f, m, t))
                             print('  Looking for:', name)
-                            if name in problems[prb]:
+                            if name in problems[prb] and ch in problems[prb][name]['timelines']:
                                 print('    Found!')
                                 d = problems[prb][name]
                                 y = d['timelines'][ch]
@@ -309,70 +285,72 @@ load_general_reports()
 load_seconds_data()
 load_timelines_data()
 # define convergence plots
-# TODO compare corrected and tentative velocity
 # TODO compare 'PEn' amd 'PTEn' for rotation schemes
-# characteristics = ['time', 'CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'TE_L2r', 'TE_H1r', 'TE_H1wr', 'FEr']
-characteristics = ['time', 'CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'FEr']
-# QQ is it possible to merge characteristics comparison to current code?
-c_plot = {'all': problem_list,
+c_plots = {}
+# conv. plot: more problems, one characteristic
+compare_problems = {'all': problem_list,
           'normal vs no3bc': ['IBC_I', 'IBCbI'],
           'normal vs rotation': ['IBC_I', 'IBCRI'],
-          'rotation vs rot+no3bc': ['IBCRI', 'IBCrI']}
-for oneplot in c_plot['all']:
-    c_plot[oneplot] = [oneplot]
-
-create_convergence_plots()
-
-# last time characteristics for timelines:
-# 'AVN_L2', 'AVN_H1',
-# 'CE_L2', 'CE_L2s', 'CE_L2n', 'CE_L2r',
-# 'DT', 'DTs',
-# 'APG', 'APGs', 'APGn',
-# 'PGEA', 'PGEAs', 'PGEAn',
-# 'CE_H1', 'CE_H1s', 'CE_H1r',
-# 'PG', 'PGs', 'PGn',
-# 'AF',
-# 'CE_H1w', 'CE_H1ws', 'CE_H1wr',
-# 'APN',
-# 'TE_L2', 'TE_L2s', 'TE_L2n', 'TE_L2r',
-# 'TE_H1', 'TE_H1s', 'TE_H1r',
-# 'DC', 'DCs',
-# 'TE_H1w', 'TE_H1ws', 'TE_H1wr',
-# 'PE', 'PEs', 'PEn',
-# 'PGE', 'PGEs', 'PGEn',
-# 'FE', 'FEr',
-# 'AVN_H1w'
+          'rotation vs rot+no3bc': ['IBCRI', 'IBCrI'],
+          'all rotation': ['IBCRI', 'IBCrI', 'IBCRD', 'IBCRd'],
+          'rotation Krylov vs direct': ['IBCRI', 'IBCRD'],
+          'rotation Krylov vs direct + no3bc': ['IBCrI', 'IBCRd']}
+# for oneplot in compare_problems['all']:
+#     compare_problems[oneplot] = [oneplot]
+# characteristics = ['time', 'CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'FEr']
+characteristics = ['time', 'CE_H1r', 'PEn', 'FEr']
+# characteristics_single = ['time', 'PEn', 'FEr']
+for (pr_name, prbs) in compare_problems.iteritems():
+    for f in [1, 3]:
+        for chs in characteristics:
+            name = '%s %s f=%s' % (pr_name, chs, f_str[f])
+            c_plots[name] = {
+                'problems': prbs, 'characteristics': [chs],
+                'colors': 'problems', 'factors': [f],
+                'label': lambda prb, f, ch, m, t: '%s' % prb
+            }
+# conv. plot: one problem, more characteristics
+compare_params = {'velocity error norms': ['CE_L2r', 'CE_H1r', 'CE_H1wr'],
+                  'tentative vs corected error H1': ['TE_H1r', 'CE_H1r'],
+                  #'tentative vs corected error H1 wall': ['TE_H1wr', 'CE_H1wr'],
+                  }
+# for char in characteristics_single:
+#     compare_params[char] = [char]
+for (ch_name, chs) in compare_params.iteritems():
+    for f in [1]:
+        for prb in problem_list:
+            name = '%s %s f=%s' % (prb, ch_name, f_str[f])
+            c_plots[name] = {
+                'problems': [prb], 'characteristics': chs,
+                'colors': 'characteristics', 'factors': [f],
+                'label': lambda prb, f, ch, m, t: '%s' % ch
+            }
+# create_convergence_plots()
 
 # define plots:
-# plot: one parameter, one problem, one factor, 3 or 1 meshes, 5 dts
-# plot1 = ['CE_H1r']
+# plot: one parameter, one problem, one factor, 3 meshes, 5 dts
 t_plots = {}
-plot1 = ['CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn']
-# plot1 = ['CE_L2', 'CE_L2r', 'CE_H1', 'CE_H1r', 'CE_H1w', 'CE_H1wr', 'TE_L2', 'TE_L2r', 'TE_H1', 'TE_H1t', 'TE_H1w',
-#          'TE_H1wr', 'FE', 'FEr', 'PE', 'PEn', 'PGE', 'PGEn',]
+# plot1 = ['CE_H1r', 'PEn']
+plot1 = []
 for problem in problem_list:
     for f in [1]:
         for char in plot1:
-            name = problem + ' ' + char
-            t_plots[name] = {}
-            t_plots[name]['characteristics'] = [char]
-            t_plots[name]['times'] = dts
-            t_plots[name]['problems'] = [problem]
-            t_plots[name]['meshes'] = meshes
-            t_plots[name]['factors'] = [f]
-            t_plots[name]['colors'] = 'times'
-            t_plots[name]['formats'] = 'meshes'
-            t_plots[name]['label'] = lambda prb, f, ch, m, t: '%d on mesh %d' % (dtToMs[t], m)
-            t_plots[name]['legend size'] = 1.0
+            name = problem + ' ' + char + ' f=' + f_str[f]
+            t_plots[name] = {
+                'characteristics': [char], 'problems': [problem],
+                'factors': [f], 'times': dts, 'meshes': meshes,
+                'colors': 'times', 'formats': 'meshes',
+                'label': lambda prb, f, ch, m, t: '%dms on mesh %d' % (dtToMs[t], m),
+                'legend size': 1.0
+            }
 # QQ which to use?  >> let choose shorter set
 # same plot with analytic value
 plot2 = {'PG': 'APG'}  # NT: iplement ad hoc, does nothing
 # QQ other plots?
 # plot: compare more parameters, one problem, one factor, 1 mesh, 5 dts
-compare_params = {'velocity error norms': ['CE_L2r', 'CE_H1r'],
-                  'velocity error norms 2': ['CE_L2r', 'CE_H1r', 'CE_H1wr'],
-                  'tentative vs corected H1': ['TE_H1r', 'CE_H1r'],
-                  'tentative vs corected H1 wall': ['TE_H1wr', 'CE_H1wr'],
+compare_params = {# 'velocity error norms': ['CE_L2r', 'CE_H1r', 'CE_H1wr'],
+                  # 'tentative vs corected error H1': ['TE_H1r', 'CE_H1r'],
+                  # 'tentative vs corected error H1 wall': ['TE_H1wr', 'CE_H1wr'],
                   'force error composition': ['FNE', 'FSE', 'FE'],
                   'force error relative composition': ['FNEr', 'FSEr', 'FEr'],
                   }
@@ -380,19 +358,30 @@ for problem in problem_list:
     for f in [1]:
         for m in meshes:
             for (plot_name, params) in compare_params.iteritems():
-                name = problem + ' ' + plot_name + ' on mesh %d ' % m + 'f = ' + f_str[f]
-                t_plots[name] = {}
-                t_plots[name]['characteristics'] = params
-                t_plots[name]['times'] = dts
-                t_plots[name]['problems'] = [problem]
-                t_plots[name]['meshes'] = [m]
-                t_plots[name]['factors'] = [f]
-                t_plots[name]['colors'] = 'times'
-                t_plots[name]['formats'] = 'characteristics'
-                t_plots[name]['label'] = lambda prb, f, ch, m, t: '%s %d' % (ch, dtToMs[t])
-                t_plots[name]['legend size'] = 1.0
+                name = problem + ' ' + plot_name + ' on mesh %d ' % m + 'f=' + f_str[f]
+                t_plots[name] = {
+                    'characteristics': params, 'problems': [problem],
+                    'factors': [f], 'times': dts, 'meshes': [m],
+                    'colors': 'times', 'formats': 'characteristics',
+                    'label': lambda prb, f, ch, m, t: '%s %dms' % (ch, dtToMs[t]),
+                    'legend size': 1.0
+                }
 
-# TODO plot: compare more problems, one problem, one factor, 1 mesh, 5 dts
+# plot: compare more problems, one parameter, one factor, 1 mesh, 5 dts
+compare_problems.pop('all')
+compare_problems = {}
+for ch in ['CE_H1r', 'PEn', 'FEr']:
+    for f in [1]:
+        for m in meshes:
+            for (plot_name, prbs) in compare_problems.iteritems():
+                name = plot_name + ' ' + ch + ' on mesh %d ' % m + 'f=' + f_str[f]
+                t_plots[name] = {
+                    'characteristics': [ch], 'problems': prbs,
+                    'factors': [f], 'times': dts, 'meshes': [m],
+                    'colors': 'times', 'formats': 'problems',
+                    'label': lambda prb, f, ch, m, t: '%s %dms' % (prb, dtToMs[t]),
+                    'legend size': 1.0
+                }
 
 create_timelines_plots()
 

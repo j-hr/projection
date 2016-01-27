@@ -426,7 +426,7 @@ class ResultsManager:
         self.tc.start('status')
         f = open(self.problem.d()['name'] + ".run", "w")
         progress = t/self.problem.d()['cycles']
-        f.write('t = %5.3f\nprogress = %3.0f %%\nlast error = %5.3f' % (t, 100*progress, self.last_error))
+        f.write('t = %5.3f (dt=%3dms)\nprogress = %3.0f %%\nlast error = %5.3f\n' % (t, self.problem.d()['dt_ms'], 100*progress, self.last_error))
         f.close()
         self.tc.end('status')
 
