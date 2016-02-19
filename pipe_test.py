@@ -71,6 +71,7 @@ parser.add_argument('mesh', help='Mesh name')
 parser.add_argument('time', help='Total time', type=int)
 parser.add_argument('dt', help='Time step', type=float)
 parser.add_argument('-F', '--factor', help='Velocity scale factor', type=float, default=1.0)
+parser.add_argument('--nu', help='nu factor', type=float, default=1.0)
 parser.add_argument('-e', '--error', help='Error control mode', choices=['doEC', 'noEC', 'test'], default='doEC')
 parser.add_argument('-S', '--save', help='Save solution mode', choices=['doSave', 'noSave', 'diff'], default='noSave')
 #   doSave: create .xdmf files with velocity, pressure, divergence
@@ -149,7 +150,7 @@ if args.bc == 'lagrange':
     QL = Q*L
 
 # fixed parameters (used in analytic solution and in BC)
-nu = 3.71  # kinematic viscosity
+nu = problem.d()['nu']  # kinematic viscosity
 R = 5.0  # cylinder radius
 
 # in/outflow area

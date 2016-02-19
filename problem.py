@@ -24,6 +24,7 @@ class Problem:
             'pressureBC': args.bc,
             'scale factor': args.factor,
             'cycles': args.time,
+            'nu': 3.71 * args.nu,
             'dt': args.dt,
             'dt_ms': int(round(args.dt*1000)),
             'rotation scheme': args.r,

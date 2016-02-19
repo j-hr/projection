@@ -3,7 +3,7 @@ import mshr
 
 set_log_level(WARNING)
 
-# mesh factors, doporuceno 10
+# mesh factor
 factor = 50
 
 # Define domain
@@ -23,7 +23,7 @@ geometry = box - cylinder
 
 # Build mesh
 mesh = mshr.generate_mesh(geometry, factor)
-
+print(mesh)
 plot(mesh, title="mesh", interactive=True)
 exit()
 

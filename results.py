@@ -87,7 +87,7 @@ class ResultsManager:
         self.divergence_treshold = 10
 
         # fixed parameters (used in analytic solution and in BC)
-        self.nu = 3.71  # kinematic viscosity
+        self.nu = problem.d()['nu']  # kinematic viscosity
         self.R = 5.0  # cylinder radius
 
         # from main
@@ -277,14 +277,13 @@ class ResultsManager:
         self.solutionSpace = solution_space
         self.stepsInSecond = int(round(1.0 / float(dt)))
         print("results: stepsInSecond = ", self.stepsInSecond)
-        if self.doErrControl:
-            if not self.isSteadyFlow:
-                self.load_precomputed_bessel_functions(mesh_name, partial_solution_space)
-            else:
-                temp = toc()
-                self.solution = interpolate(
-                    Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"), factor=self.factor), solution_space)
-                print("Prepared analytic solution. Time: %f" % (toc() - temp))
+        if not self.isSteadyFlow:
+            self.load_precomputed_bessel_functions(mesh_name, partial_solution_space)
+        if self.doErrControl and self.isSteadyFlow:
+            temp = toc()
+            self.solution = interpolate(
+                Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"), factor=self.factor), solution_space)
+            print("Prepared analytic solution. Time: %f" % (toc() - temp))
 
     def set_error_control_mode(self):
         if self.problem.d()['type'] == "steady":
