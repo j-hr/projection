@@ -91,33 +91,33 @@ class ResultsManager:
         self.R = 5.0  # cylinder radius
 
         # from main
-        self.factor = None
+        self.factor = problem.d()['factor']
         self.tc = time_control
         self.dsWall = None
-        self.tc.init_watch('assembleSol', 'Assembled analytic solution', True)
-        self.tc.init_watch('analyticP', 'Analytic pressure', True)
-        self.tc.init_watch('analyticVnorms', 'Computed analytic velocity norms', True)
-        self.tc.init_watch('saveP', 'Saved pressure', True)
-        self.tc.init_watch('errorP', 'Computed pressure error', True)
-        self.tc.init_watch('errorV', 'Computed velocity error', True)
-        self.tc.init_watch('errorForce', 'Computed force error', True)
-        self.tc.init_watch('errorVtest', 'Computed velocity error test', True)
-        self.tc.init_watch('div', 'Computed and saved divergence', True)
-        self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
-        self.tc.init_watch('saveVel', 'Saved velocity', True)
-        self.tc.init_watch('status', 'Reported status.', True)
+        if time_control is not None:
+            self.tc.init_watch('assembleSol', 'Assembled analytic solution', True)
+            self.tc.init_watch('analyticP', 'Analytic pressure', True)
+            self.tc.init_watch('analyticVnorms', 'Computed analytic velocity norms', True)
+            self.tc.init_watch('saveP', 'Saved pressure', True)
+            self.tc.init_watch('errorP', 'Computed pressure error', True)
+            self.tc.init_watch('errorV', 'Computed velocity error', True)
+            self.tc.init_watch('errorForce', 'Computed force error', True)
+            self.tc.init_watch('errorVtest', 'Computed velocity error test', True)
+            self.tc.init_watch('div', 'Computed and saved divergence', True)
+            self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
+            self.tc.init_watch('saveVel', 'Saved velocity', True)
+            self.tc.init_watch('status', 'Reported status.', True)
 
         # partial Bessel functions and coefficients
         self.bessel_parabolic = None
         self.bessel_real = []
         self.bessel_complex = []
-        self.coefs_exp = None
 
         self.str_dir_name = None
         self.doSave = False
         self.doSaveDiff = False
         option = self.problem.saveoption
-        if option == 'save' or option == 'diff':
+        if option == 'doSave' or option == 'diff':
             self.doSave = True
             if option == 'diff':
                 self.doSaveDiff = True
@@ -249,11 +249,17 @@ class ResultsManager:
                                   'pg2D':[self.pg2DiffFile, 'pressure_grad_tent_diff']}
         self.set_error_control_mode()
 
+        choose_note = {1.0: '', 0.1: 'nuL10', 0.01: 'nuL100', 10.0: 'nuH10'}
+        self.precomputed_filename = self.problem.d()['mesh'] + choose_note[self.problem.d()['nu_factor']]
+        print('chosen filename for precomputed solution', self.precomputed_filename)
+        self.coefs_exp = [-8, -6, -4, -2, 2, 4, 6, 8]
+
+
+
     def initialize(self, velocity_space, pressure_space, mesh, dir_name, factor, partial_solution_space, solution_space,
                    mesh_name, dt):
         print('Initializing output')
         self.str_dir_name = dir_name
-        self.factor = float(factor)
         # create directory, needed because of using "with open(..." construction later
         if not os.path.exists(self.str_dir_name):
             os.mkdir(self.str_dir_name)
@@ -278,7 +284,7 @@ class ResultsManager:
         self.stepsInSecond = int(round(1.0 / float(dt)))
         print("results: stepsInSecond = ", self.stepsInSecond)
         if not self.isSteadyFlow:
-            self.load_precomputed_bessel_functions(mesh_name, partial_solution_space)
+            self.load_precomputed_bessel_functions(partial_solution_space)
         if self.doErrControl and self.isSteadyFlow:
             temp = toc()
             self.solution = interpolate(
@@ -444,7 +450,8 @@ class ResultsManager:
 # Error control=========================================================================================================
 
     def assemble_solution(self, t):  # returns Womersley sol for time t
-        self.tc.start('assembleSol')
+        if self.tc is not None:
+            self.tc.start('assembleSol')
         sol = Function(self.solutionSpace)
         dofs2 = self.solutionSpace.sub(2).dofmap().dofs()  # gives field of indices corresponding to z axis
         sol.assign(Constant(("0.0", "0.0", "0.0")))
@@ -452,25 +459,26 @@ class ResultsManager:
         for idx in range(8):  # add modes of Womersley sol
             sol.vector()[dofs2] += self.factor * cos(self.coefs_exp[idx] * pi * t) * self.bessel_real[idx].vector().array()
             sol.vector()[dofs2] += self.factor * -sin(self.coefs_exp[idx] * pi * t) * self.bessel_complex[idx].vector().array()
-        self.tc.end('assembleSol')
+        if self.tc is not None:
+            self.tc.end('assembleSol')
         return sol
 
-    def save_solution(self, mesh_name, file_type, factor, t_start, t_end, dt, PS, solution_space):
-        self.load_precomputed_bessel_functions(mesh_name, PS)
-        self.factor = float(factor)
+    def save_solution(self, file_type, PS, solution_space):
+        self.solutionSpace = solution_space
+        self.load_precomputed_bessel_functions(PS)
         out = None
         if file_type == 'xdmf':
-            out = XDMFFile(mpi_comm_world(), 'solution_%s.xdmf' % mesh_name)
+            out = XDMFFile(mpi_comm_world(), 'solution_%s.xdmf' % self.precomputed_filename)
             out.parameters['rewrite_function_mesh'] = False
         elif file_type == 'hdf5':
-            out = HDF5File(mpi_comm_world(), 'solution_%s.hdf5' % mesh_name, 'w')
+            out = HDF5File(mpi_comm_world(), 'solution_%s.hdf5' % self.precomputed_filename, 'w')
         else:
             exit('Unsupported file type.')
         s = Function(solution_space)
         if file_type == 'hdf5':
-            t = int(float(t_start)*1000)
-            dt = int(float(dt)*1000)
-            t_end = int(round(float(t_end)*1000))
+            t = 0.0
+            dt = self.problem.d()['dt_ms']
+            t_end = self.problem.d()['time']*1000
             while t <= t_end:
                 print("t = ", t)
                 s.assign(self.assemble_solution(float(t)/1000.0))
@@ -479,19 +487,20 @@ class ResultsManager:
                 print('saved to hdf5, sol'+str(t))
                 t += dt
         elif file_type == 'xdmf':
-            t = float(t_start)
+            t = 0.0
+            dt = self.problem.d()['dt']
+            t_end = self.problem.d()['cycles']
             while t <= float(t_end) + DOLFIN_EPS:
                 print("t = ", t)
                 s.assign(self.assemble_solution(t))
                 # plot(s, mode = "glyphs", title = 'saved_xdmf', interactive = True)
                 out << s
                 print('saved to xdmf')
-                t += float(dt)
+                t += dt
 
     # load precomputed Bessel functions
-    def load_precomputed_bessel_functions(self, mesh_name, PS):
-        self.coefs_exp = [-8, 8, 6, -6, -4, 4, 2, -2]
-        f = HDF5File(mpi_comm_world(), 'precomputed/precomputed_'+mesh_name+'.hdf5', 'r')
+    def load_precomputed_bessel_functions(self, PS):
+        f = HDF5File(mpi_comm_world(), 'precomputed/precomputed_' + self.precomputed_filename + '.hdf5', 'r')
         temp = toc()
         fce = Function(PS)
         f.read(fce, "parab")

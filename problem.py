@@ -25,10 +25,12 @@ class Problem:
             'scale factor': args.factor,
             'cycles': args.time,
             'nu': 3.71 * args.nu,
+            'nu_factor': args.nu,
             'dt': args.dt,
             'dt_ms': int(round(args.dt*1000)),
             'rotation scheme': args.r,
-            'no3rdBC': args.B
+            'no3rdBC': args.B,
+            'factor': args.factor
         }
         self.ECoption = args.error
         self.saveoption = args.save

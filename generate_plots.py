@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import argparse
 import problem as prb
 import math
+import numpy
 __author__ = 'jh'
 
 # global variables
@@ -186,7 +187,9 @@ def create_convergence_plots():
                 a.set_xscale('log')
                 a.set_yscale('log')
                 a.set_ylim(min_*0.95, max_*1.05)
-
+                # TODO add ticks and ticklabels for min and max values
+                #a.set_yticks(a.get_yticks().tolist() + [min_, max_])
+                #a.set_yticklabels(a.get_yticklabels().extend([min_, max_]))
             axesT = figT.axes[0]
             splT.set_xlabel('dt in ms')
             splT.set_xlim(100.5, 0.95)
@@ -289,12 +292,13 @@ load_timelines_data()
 c_plots = {}
 # conv. plot: more problems, one characteristic
 compare_problems = {'all': problem_list,
-          'normal vs no3bc': ['IBC_I', 'IBCbI'],
-          'normal vs rotation': ['IBC_I', 'IBCRI'],
-          'rotation vs rot+no3bc': ['IBCRI', 'IBCrI'],
-          'all rotation': ['IBCRI', 'IBCrI', 'IBCRD', 'IBCRd'],
-          'rotation Krylov vs direct': ['IBCRI', 'IBCRD'],
-          'rotation Krylov vs direct + no3bc': ['IBCrI', 'IBCRd']}
+          # 'normal vs no3bc': ['IBC_I', 'IBCbI'],
+          # 'normal vs rotation': ['IBC_I', 'IBCRI'],
+          # 'rotation vs rot+no3bc': ['IBCRI', 'IBCrI'],
+          # 'all rotation': ['IBCRI', 'IBCrI', 'IBCRD', 'IBCRd'],
+          # 'rotation Krylov vs direct': ['IBCRI', 'IBCRD'],
+          # 'rotation Krylov vs direct + no3bc': ['IBCrI', 'IBCRd']}
+}
 # for oneplot in compare_problems['all']:
 #     compare_problems[oneplot] = [oneplot]
 # characteristics = ['time', 'CE_L2r', 'CE_H1r', 'CE_H1wr', 'PEn', 'FEr']
@@ -325,7 +329,7 @@ for (ch_name, chs) in compare_params.iteritems():
                 'colors': 'characteristics', 'factors': [f],
                 'label': lambda prb, f, ch, m, t: '%s' % ch
             }
-# create_convergence_plots()
+create_convergence_plots()
 
 # define plots:
 # plot: one parameter, one problem, one factor, 3 meshes, 5 dts
