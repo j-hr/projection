@@ -62,10 +62,11 @@ PETScOptions.set('mat_mumps_icntl_4', 0)  # 1-3 gives lots of information for mu
 print(sys.argv)
 parser = argparse.ArgumentParser()
 parser.add_argument('method', help='Computing method', choices=['direct', 'chorinExpl', 'ipcs0', 'ipcs1'])
-parser.add_argument('type', help='Flow type', choices=['steady', 'pulse0', 'pulsePrec'])
+parser.add_argument('type', help='Flow type', choices=['steady', 'pulse0', 'pulsePrec', 'pulseC'])
 #   steady - parabolic profile (0.5 s onset)
 # Womersley profile (1 s period)
 #   pulse0 - u(0)=0
+#   pulseC - u(0)=solution
 #   pulsePrec - u(0) from precomputed solution (steady Stokes problem)
 parser.add_argument('mesh', help='Mesh name')
 parser.add_argument('time', help='Total time', type=int)
@@ -87,6 +88,7 @@ parser.add_argument('-b', '--bc', help='Pressure boundary condition mode', choic
 parser.add_argument('-n', '--name', default='test')
 parser.add_argument('-r', help='Use rotation scheme', action='store_true')
 parser.add_argument('-B', help='Use no BC in correction step', action='store_true')
+# TODO separate
 
 args = parser.parse_args()
 print(args)
@@ -201,7 +203,7 @@ if args.type == "pulsePrec":
         # lhs(F) == rhs(F) means that is a linear problem
         solve(lhs(F) == rhs(F), w, bcu, solver_parameters={'linear_solver': 'mumps'})
     except RuntimeError as inst:
-        rm.report_fail(args.name, dt, t)
+        rm.report_fail(t)
         exit()
     # Extract solutions:
     (u_prec, p_prec) = w.split()
@@ -363,7 +365,7 @@ if args.method == "chorinExpl":
         try:
             solver_vel.solve(A1, u1.vector(), b1)
         except RuntimeError as inst:
-            rm.report_fail(args.name, dt, t)
+            rm.report_fail(t)
             exit()
         rm.compute_err(True, u1, t)
         rm.compute_div(True, u1)
@@ -379,7 +381,7 @@ if args.method == "chorinExpl":
         try:
             solver_p.solve(A2, p1.vector(), b2)
         except RuntimeError as inst:
-            rm.report_fail(args.name, dt, t)
+            rm.report_fail(t)
             exit()
         averaging_pressure(p1)
         save_pressure(False, p1)
@@ -392,7 +394,7 @@ if args.method == "chorinExpl":
         try:
             solve(A3, u1.vector(), b3, "gmres", "default")
         except RuntimeError as inst:
-            rm.report_fail(args.name, dt, t)
+            rm.report_fail(t)
             exit()
         rm.compute_err(False, u1, t)
         rm.compute_div(False, u1)
@@ -484,7 +486,7 @@ if args.method == 'ipcs0':
         try:
             solver_vel.solve(A1, u1.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(args.name, dt, t)
+            rm.report_fail(t)
             exit()
         rm.compute_err(True, u1, t)
         rm.compute_div(True, u1)
@@ -501,7 +503,7 @@ if args.method == 'ipcs0':
         try:
             solver_p.solve(A2, p1.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(args.name, dt, t)
+            rm.report_fail(t)
             exit()
         averaging_pressure(p1)
         save_pressure(False, p1)
@@ -512,7 +514,7 @@ if args.method == 'ipcs0':
         try:
             solver_vel.solve(A3, u1.vector(), b)
         except RuntimeError as inst:
-            rm.report_fail(args.name, dt, t)
+            rm.report_fail(t)
             exit()
         rm.compute_err(False, u1, t)
         rm.compute_div(False, u1)
@@ -565,6 +567,10 @@ if args.method == 'ipcs1':
         assign(u0, u_prec)
         assign(u1, u_prec)
         assign(p0, p_prec)
+    if args.type == "pulseC":
+        assign(u0, rm.assemble_solution(0.0))
+        assign(u1, rm.assemble_solution(-dt))
+        assign(p0, interpolate(womersleyBC.analytic_pressure(factor, 0.0), Q))
     if rm.doSave:
         rm.save_vel(False, u0, 0.0)
         rm.save_vel(True, u0, 0.0)
@@ -708,7 +714,7 @@ if args.method == 'ipcs1':
                 solver_p.solve(A2, p_.vector(), b)
             tc.end('solve 2')
         except RuntimeError as inst:
-            rm.report_fail(args.name, dt, t)
+            rm.report_fail(t)
             exit()
         if useRotationScheme:
             foo = Function(Q)
@@ -743,7 +749,7 @@ if args.method == 'ipcs1':
             solver_vel.solve(A3, u_cor.vector(), b)
             tc.end('solve 3')
         except RuntimeError as inst:
-            rm.report_fail(args.name, dt, t)
+            rm.report_fail(t)
             exit()
         rm.compute_err(False, u_cor, t)
         rm.compute_div(False, u_cor)
@@ -762,7 +768,7 @@ if args.method == 'ipcs1':
                 solver_rot.solve(A4, p_mod.vector(), b)
                 tc.end('solve 4')
             except RuntimeError as inst:
-                rm.report_fail(args.name, dt, t)
+                rm.report_fail(t)
                 exit()
             averaging_pressure(p_mod)
             save_pressure(False, p_mod)
@@ -864,7 +870,7 @@ if args.method == "direct":
             NS_solver.solve()
             tc.end('solve 1')
         except RuntimeError as inst:
-            rm.report_fail(args.name, dt, t)
+            rm.report_fail(t)
             exit()
         end()
 
