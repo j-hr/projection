@@ -243,18 +243,16 @@ class ResultsManager:
                              'pD': [self.pDiffFile, 'pressure_diff'],
                              'pgD': [self.pgDiffFile, 'pressure_grad_diff']}
         self.fileDictTentDiff = {'u2D': [self.u2DiffFile, 'velocity_tent_diff']}
-        self.fileDictTentP = {'p2': [self.p2File, 'pressure_tent'],
-                              'pg2':[self.pg2File, 'pressure_grad_tent']}
-        self.fileDictTentPDiff = {'p2D': [self.p2DiffFile, 'pressure_tent_diff'],
-                                  'pg2D':[self.pg2DiffFile, 'pressure_grad_tent_diff']}
+        self.fileDictTentP = {'p2': [self.p2File, 'pressure_tent']}
+        #                      'pg2': [self.pg2File, 'pressure_grad_tent']}
+        self.fileDictTentPDiff = {'p2D': [self.p2DiffFile, 'pressure_tent_diff']}
+        #                          'pg2D': [self.pg2DiffFile, 'pressure_grad_tent_diff']}
         self.set_error_control_mode()
 
         choose_note = {1.0: '', 0.1: 'nuL10', 0.01: 'nuL100', 10.0: 'nuH10'}
         self.precomputed_filename = self.problem.d()['mesh'] + choose_note[self.problem.d()['nu_factor']]
         print('chosen filename for precomputed solution', self.precomputed_filename)
         self.coefs_exp = [-8, -6, -4, -2, 2, 4, 6, 8]
-
-
 
     def initialize(self, velocity_space, pressure_space, mesh, dir_name, factor, partial_solution_space, solution_space,
                    mesh_name, dt):
@@ -379,20 +377,20 @@ class ResultsManager:
         self.tc.start('saveP')
         if self.doSave:
             self.fileDict['p2' if is_tent else 'p'][0] << pressure
-            pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)
-            self.pgFunction.assign(pg)
-            self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
+            # pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)
+            # self.pgFunction.assign(pg)
+            # self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
             if self.doSaveDiff:
                 sol_pg_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pg_normalization_factor[0])
-                sol_pg = interpolate(sol_pg_expr, self.pgSpace)
+                # sol_pg = interpolate(sol_pg_expr, self.pgSpace)
                 # plot(sol_p, title="sol")
                 # plot(pressure, title="p")
                 # plot(pressure - sol_p, interactive=True, title="diff")
                 # exit()
                 self.pFunction.assign(pressure-self.sol_p)
                 self.fileDict['p2D' if is_tent else 'pD'][0] << self.pFunction
-                self.pgFunction.assign(pg-sol_pg)
-                self.fileDict['pg2D' if is_tent else 'pgD'][0] << self.pgFunction
+                # self.pgFunction.assign(pg-sol_pg)
+                # self.fileDict['pg2D' if is_tent else 'pgD'][0] << self.pgFunction
         self.tc.end('saveP')
         self.tc.start('errorP')
         error = errornorm(self.sol_p, pressure, norm_type="l2", degree_rise=0)
