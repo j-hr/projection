@@ -8,9 +8,9 @@ from sympy import re, im, sqrt, symbols, lambdify, besselj, sympify
 
 __author__ = 'jh'
 
-note = 'nuL100'  # to append name of precomputed solution modification
+note = ''  # to append name of precomputed solution modification
 fname = 'tmp.csv'
-R = 5.0
+R = 1.5
 # read coeficients from chosen file
 infile = open(fname, 'r')
 csvreader = csv.reader(infile, delimiter=',')
@@ -21,8 +21,9 @@ coefs_bes = [sympify(i.replace('*^', 'E')) for i in csvreader.next()]
 coef_par_max = csvreader.next()[0]
 coef_par = csvreader.next()[0]
 
-for meshName in ['cyl_c1', 'cyl_c2', 'cyl_c3']:
-# for meshName in ['cyl_c2']:
+# for meshName in ['cyl_d1', 'cyl_d2', 'cyl_d3', 'cyl_e3']:
+#for meshName in ['cyl_c1', 'cyl_c2', 'cyl_c3']:
+for meshName in ['cyl15_3']:
     print('Mesh: '+meshName)
     mesh = Mesh("meshes/" + meshName + ".xml")
     cell_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_physical_region.xml")
