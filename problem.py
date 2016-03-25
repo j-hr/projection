@@ -5,7 +5,14 @@ __author__ = 'jh'
 meshToH = {
     'cyl_c1': 2.24,
     'cyl_c2': 1.07,
-    'cyl_c3': 0.53
+    'cyl_c3': 0.53,
+    'cyl_c3o': 0.37,
+    'cyl_c3o_netgen': 0.35,
+    'cyl_d1': 2.18,
+    'cyl_d2': 1.07,
+    'cyl_d3': 0.53,
+    'cyl_e3': 0.39,
+    'cyl15_3': 0.12,
 }
 
 
