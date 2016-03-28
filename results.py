@@ -10,7 +10,7 @@ import problem as prb
 
 class TimeControl:
     def __init__(self):
-        # watch is list [total_time, last_start, message_when_measured]
+        # watch is list [total_time, last_start, message_when_measured, count into total time]
         self.watches = {}
         self.last_measurement = 0
         tic()

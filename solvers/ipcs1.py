@@ -1,17 +1,22 @@
 from __future__ import print_function
-from dolfin import *
+from dolfin import Function, VectorFunctionSpace, FunctionSpace, assemble
+from dolfin.cpp.common import info, begin, end
+from dolfin.cpp.function import FunctionAssigner
+from dolfin.cpp.la import LUSolver, KrylovSolver, as_backend_type, VectorSpaceBasis, Vector
+from dolfin.functions import TrialFunction, TestFunction, Constant
+from ufl import dot, dx, grad, system, div, inner
+
 import general_solver as gs
 
 # QQ split rotation, lagrange scheme?
+# (implement as this Solver subclass? Can class be subclass of class with same name?)
+# in current state almost no code is saved by subclassing this, one must rewrite whole solve()
 
 
 class Solver(gs.GeneralSolver):
-    def __init__(self, args, tc):
-        gs.GeneralSolver.__init__(self, args, tc)
-
-        self.V = None
-        self.Q = None
-        self.PS = None
+    def __init__(self, args, tc, metadata):
+        gs.GeneralSolver.__init__(self, args, tc, metadata)
+        self.metadata['hasTentativeV'] = True
 
         self.solver_vel = None
         self.solver_p = None
@@ -22,6 +27,8 @@ class Solver(gs.GeneralSolver):
         self.bc = args.bc
         self.solvers = args.solvers
         self.useRotationScheme = args.r
+        self.metadata['hasTentativeP'] = self.useRotationScheme
+
         self.B = args.B
         self.prec = args.prec
         self.precision = args.precision
@@ -42,48 +49,12 @@ class Solver(gs.GeneralSolver):
         parser.add_argument('-r', help='Use rotation scheme', action='store_true')
         parser.add_argument('-B', help='Use no BC in correction step', action='store_true')
 
-    def set_projection_solvers(self):
-        if self.solvers == 'direct':
-            self.solver_vel = LUSolver('mumps')
-            self.solver_p = LUSolver('umfpack')
-            if self.useRotationScheme:
-                self.solver_rot = LUSolver('umfpack')
-        else:
-            self.solver_vel = KrylovSolver('gmres', 'ilu')   # nonsymetric > gmres  # IFNEED try hypre_amg
-            self.solver_p = KrylovSolver('cg', self.prec)          # symmetric > CG
-            # solver_p = KrylovSolver('gmres', 'hypre_amg')     # NT this, with disabled setnullspace gives same oscilations
-            if self.useRotationScheme:
-                self.solver_rot = KrylovSolver('cg', self.prec)
-
-            solver_options = {'absolute_tolerance': 10E-12, 'relative_tolerance': 10**(-self.precision),
-                       'monitor_convergence': True, 'maximum_iterations': 500}
-
-        # Get the nullspace if there are no pressure boundary conditions
-        foo = Function(self.Q)     # auxiliary vector for setting pressure nullspace
-        if self.bc in ['nullspace', 'nullspace_s']:
-            null_vec = Vector(foo.vector())
-            self.Q.dofmap().set(null_vec, 1.0)
-            null_vec *= 1.0/null_vec.norm('l2')
-            null_space = VectorSpaceBasis([null_vec])
-            if self.bc == 'nullspace':
-                as_backend_type(A2).set_nullspace(null_space)
-
-        # apply global options for Krylov solvers
-        if self.solvers == 'krylov':
-            for solver in [self.solver_vel, self.solver_p, self.solver_rot] if self.useRotationScheme else \
-                    [self.solver_vel, self.solver_p]:
-                for key, value in solver_options.items():
-                    try:
-                        solver.parameters[key] = value
-                    except KeyError:
-                        print('Invalid option %s for KrylovSolver' % key)
-                        exit()
-                solver.parameters['preconditioner']['structure'] = 'same'
-
-    def solve(self, problem, options):
+    def solve(self, problem):
         self.problem = problem
+        doSave = problem.doSave
+
         self.tc.start('init')
-        nu = self.problem.nu
+        nu = Constant(self.problem.nu)
         # TODO check proper use of watches
         self.tc.init_watch('init', 'Initialization', True)
         self.tc.init_watch('rhs', 'Assembled right hand side', True)
@@ -91,7 +62,6 @@ class Solver(gs.GeneralSolver):
         self.tc.init_watch('applybc1', 'Applied velocity BC 1st step', True)
         self.tc.init_watch('applybc3', 'Applied velocity BC 3rd step', True)
         self.tc.init_watch('applybcP', 'Applied pressure BC or othogonalized rhs', True)
-        self.tc.init_watch('averageP', 'Averaged pressure', True)
         self.tc.init_watch('assembleMatrices', 'Initial matrix assembly', False)
         self.tc.init_watch('solve 1', 'Running solver on 1st step', True)
         self.tc.init_watch('solve 2', 'Running solver on 2nd step', True)
@@ -124,7 +94,7 @@ class Solver(gs.GeneralSolver):
         u0, p0 = self.problem.get_initial_conditions(self.V, self.Q)
         u1 = u0
 
-        # if rm.doSave:
+        # if doSave:
         #     rm.save_vel(False, u0, 0.0)
         #     rm.save_vel(True, u0, 0.0)
 
@@ -138,7 +108,7 @@ class Solver(gs.GeneralSolver):
         p_mod = Function(self.Q)      # current modified pressure from rotation scheme
 
         # Define coefficients
-        k = Constant(options['dt'])
+        k = Constant(self.metadata['dt'])
         f = Constant((0, 0, 0))
 
         # Define forms
@@ -202,23 +172,59 @@ class Solver(gs.GeneralSolver):
             A4 = assemble(a4)
         self.tc.end('assembleMatrices')
 
-        self.set_projection_solvers()
+        if self.solvers == 'direct':
+            self.solver_vel = LUSolver('mumps')
+            self.solver_p = LUSolver('umfpack')
+            if self.useRotationScheme:
+                self.solver_rot = LUSolver('umfpack')
+        else:
+            self.solver_vel = KrylovSolver('gmres', 'ilu')   # nonsymetric > gmres  # IFNEED try hypre_amg
+            self.solver_p = KrylovSolver('cg', self.prec)          # symmetric > CG
+            if self.useRotationScheme:
+                self.solver_rot = KrylovSolver('cg', self.prec)
+
+        solver_options = {'absolute_tolerance': 10E-12, 'relative_tolerance': 10**(-self.precision),
+                          'monitor_convergence': True, 'maximum_iterations': 500}
+
+        # Get the nullspace if there are no pressure boundary conditions
+        foo = Function(self.Q)     # auxiliary vector for setting pressure nullspace
+        if self.bc in ['nullspace', 'nullspace_s']:
+            null_vec = Vector(foo.vector())
+            self.Q.dofmap().set(null_vec, 1.0)
+            null_vec *= 1.0/null_vec.norm('l2')
+            null_space = VectorSpaceBasis([null_vec])
+            if self.bc == 'nullspace':
+                as_backend_type(A2).set_nullspace(null_space)
+
+        # apply global options for Krylov solvers
+        if self.solvers == 'krylov':
+            for solver in [self.solver_vel, self.solver_p, self.solver_rot] if self.useRotationScheme else \
+                    [self.solver_vel, self.solver_p]:
+                for key, value in solver_options.items():
+                    try:
+                        solver.parameters[key] = value
+                    except KeyError:
+                        print('Invalid option %s for KrylovSolver' % key)
+                        exit()
+                solver.parameters['preconditioner']['structure'] = 'same'
 
         if self.bc == 'lagrange':
             fa = FunctionAssigner(self.Q, QL.sub(0))
 
         problem.initialize(self.V, self.Q, self.PS)
+
         # boundary conditions
         bcu, bcp = problem.get_boundary_conditions(self.V, self.Q, self.bc == 'outflow')
         self.tc.end('init')
         # Time-stepping
         info("Running of Incremental pressure correction scheme n. 1")
-        dt = options['dt']
-        ttime = options['time']
+        dt = self.metadata['dt']
+        ttime = self.metadata['time']
         t = dt
         while t < (ttime + dt/2.0):
             print("t = ", t)
             self.problem.update_time(t)
+            self.write_status_file(t, problem.last_status_functional, problem.status_functional_str)
 
             # assemble matrix (it depends on solution)
             self.tc.start('assembleA1')
@@ -238,12 +244,14 @@ class Solver(gs.GeneralSolver):
                 self.solver_vel.solve(A1, u_.vector(), b)
                 self.tc.end('solve 1')
             except RuntimeError as inst:
-                # rm.report_fail(t)  # TODO implement into GeneralSolver
+                self.report_fail(t)
                 exit()
             # rm.compute_err(True, u_, t)
             # rm.compute_div(True, u_)
-            # if rm.doSave:
-            #     rm.save_vel(True, u_, t)
+            if doSave:
+                self.tc.start('saveVel')
+                problem.save_vel(True, u_, t)
+                self.tc.end('saveVel')
             #     rm.save_div(True, u_)
             end()
 
@@ -268,25 +276,27 @@ class Solver(gs.GeneralSolver):
                     self.solver_p.solve(A2, p_.vector(), b)
                 self.tc.end('solve 2')
             except RuntimeError as inst:
-                # rm.report_fail(t)
+                self.report_fail(t)
                 exit()
-            # if self.useRotationScheme:
-            #     foo = Function(self.Q)
-            #     if self.bc == 'lagrange':
-            #         fa.assign(pQ, p_QL.sub(0))
-            #         foo.assign(pQ + p0)
-            #     else:
-            #         foo.assign(p_+p0)
-            #     averaging_pressure(foo)  # TODO implement in general_solver
-            #     save_pressure(True, foo)
-            # else:
-            #     if args.bc == 'lagrange':
-            #         fa.assign(pQ, p_QL.sub(0))
-            #         averaging_pressure(pQ)
-            #         save_pressure(False, pQ)
-            #     else:
-            #         averaging_pressure(p_)
-            #         save_pressure(False, p_)
+            self.tc.start('saveP')
+            if self.useRotationScheme:
+                foo = Function(self.Q)
+                if self.bc == 'lagrange':
+                    fa.assign(pQ, p_QL.sub(0))
+                    foo.assign(pQ + p0)
+                else:
+                    foo.assign(p_+p0)
+                problem.averaging_pressure(foo)
+                problem.save_pressure(True, foo)
+            else:
+                if self.bc == 'lagrange':
+                    fa.assign(pQ, p_QL.sub(0))
+                    problem.averaging_pressure(pQ)
+                    problem.save_pressure(False, pQ)
+                else:
+                    problem.averaging_pressure(p_)
+                    problem.save_pressure(False, p_)
+            self.tc.end('saveP')
             end()
 
             begin("Computing corrected velocity")
@@ -302,11 +312,11 @@ class Solver(gs.GeneralSolver):
                 self.solver_vel.solve(A3, u_cor.vector(), b)
                 self.tc.end('solve 3')
             except RuntimeError as inst:
-                #rm.report_fail(t)
+                self.report_fail(t)
                 exit()
             # rm.compute_err(False, u_cor, t)
             # rm.compute_div(False, u_cor)
-            # if rm.doSave:
+            # if doSave:
             #     rm.save_vel(False, u_cor, t)
             #     rm.save_div(False, u_cor)
             end()
@@ -321,10 +331,12 @@ class Solver(gs.GeneralSolver):
                     self.solver_rot.solve(A4, p_mod.vector(), b)
                     self.tc.end('solve 4')
                 except RuntimeError as inst:
-                    # rm.report_fail(t)
+                    self.report_fail(t)
                     exit()
-                # averaging_pressure(p_mod)
-                # save_pressure(False, p_mod)
+                self.tc.start('saveP')
+                problem.averaging_pressure(p_mod)
+                problem.save_pressure(False, p_mod)
+                self.tc.end('saveP')
                 end()
 
             # plot(p_, title='tent')
@@ -350,5 +362,5 @@ class Solver(gs.GeneralSolver):
             self.tc.end('next')
 
         info("Finished: Incremental pressure correction scheme n. 1")
-
+        problem.report()
 
