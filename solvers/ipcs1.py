@@ -224,7 +224,7 @@ class Solver(gs.GeneralSolver):
         while t < (ttime + dt/2.0):
             print("t = ", t)
             self.problem.update_time(t)
-            self.write_status_file(t, problem.last_status_functional, problem.status_functional_str)
+            problem.write_status_file(t)
 
             # assemble matrix (it depends on solution)
             self.tc.start('assembleA1')
@@ -244,9 +244,9 @@ class Solver(gs.GeneralSolver):
                 self.solver_vel.solve(A1, u_.vector(), b)
                 self.tc.end('solve 1')
             except RuntimeError as inst:
-                self.report_fail(t)
+                problem.report_fail(t)
                 exit()
-            # rm.compute_err(True, u_, t)
+            problem.compute_err(True, u_, t)
             # rm.compute_div(True, u_)
             if doSave:
                 self.tc.start('saveVel')
@@ -276,7 +276,7 @@ class Solver(gs.GeneralSolver):
                     self.solver_p.solve(A2, p_.vector(), b)
                 self.tc.end('solve 2')
             except RuntimeError as inst:
-                self.report_fail(t)
+                problem.report_fail(t)
                 exit()
             self.tc.start('saveP')
             if self.useRotationScheme:
@@ -312,12 +312,12 @@ class Solver(gs.GeneralSolver):
                 self.solver_vel.solve(A3, u_cor.vector(), b)
                 self.tc.end('solve 3')
             except RuntimeError as inst:
-                self.report_fail(t)
+                problem.report_fail(t)
                 exit()
-            # rm.compute_err(False, u_cor, t)
+            problem.compute_err(False, u_cor, t)
             # rm.compute_div(False, u_cor)
-            # if doSave:
-            #     rm.save_vel(False, u_cor, t)
+            if doSave:
+                problem.save_vel(False, u_cor, t)
             #     rm.save_div(False, u_cor)
             end()
 
@@ -331,7 +331,7 @@ class Solver(gs.GeneralSolver):
                     self.solver_rot.solve(A4, p_mod.vector(), b)
                     self.tc.end('solve 4')
                 except RuntimeError as inst:
-                    self.report_fail(t)
+                    problem.report_fail(t)
                     exit()
                 self.tc.start('saveP')
                 problem.averaging_pressure(p_mod)

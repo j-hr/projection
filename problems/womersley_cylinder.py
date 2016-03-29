@@ -5,7 +5,7 @@ from dolfin import *
 # from dolfin.cpp.io import HDF5File
 # from dolfin.cpp.mesh import Mesh, MeshFunction
 # from ufl import Measure, dx, cos, sin, Constant
-from math import pi
+from math import pi, sqrt
 
 from problems import general_problem as gp
 import womersleyBC
@@ -29,7 +29,7 @@ class Problem(object, gp.GeneralProblem):
         self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
 
         self.name = 'womersley_cylinder'
-        self.status_functional_str = 'last error'
+        self.status_functional_str = 'last H1 velocity error'
 
         # input parameters
         self.type = args.type
@@ -71,64 +71,68 @@ class Problem(object, gp.GeneralProblem):
         self.bessel_complex = []
         self.coefs_exp = [-8, -6, -4, -2, 2, 4, 6, 8]
 
+        self.analytic_v_norm_L2 = None
+        self.analytic_v_norm_H1 = None
+        self.analytic_v_norm_H1w = None
         # lists
         # dictionary of data lists {list, name, abbreviation, add scaled row to report}
         # normalisation coefficients (time-independent) are added to some lists to be used in normalized data series
+        #   coefficients are lists (updated during initialisation, so we cannot use float type)
         #   coefs are equal to average of respective value of analytic solution
         # norm lists (time-dependent normalisation coefficients) are added to some lists to be used in relative data
         #  series (to remove natural pulsation of error due to change in volume flow rate)
         # slist - lists for cycle-averaged values
         # L2(0) means L2 difference of pressures taken with zero average
         self.listDict = {
-            'u_L2': {'list': [], 'name': 'corrected velocity L2 error', 'abrev': 'CE_L2', 'scale': True,
+            'u_L2': {'list': [], 'name': 'corrected velocity L2 error', 'abrev': 'CE_L2', 'scale': self.factor,
                      'relative': 'av_norm_L2', 'slist': [], 'norm': self.vel_normalization_factor},
-            'u2L2': {'list': [], 'name': 'tentative velocity L2 error', 'abrev': 'TE_L2', 'scale': True,
+            'u2L2': {'list': [], 'name': 'tentative velocity L2 error', 'abrev': 'TE_L2', 'scale': self.factor,
                      'relative': 'av_norm_L2', 'slist': [], 'norm': self.vel_normalization_factor},
-            'u_L2test': {'list': [], 'name': 'test corrected L2 velocity error', 'abrev': 'TestCE_L2', 'scale': True},
-            'u2L2test': {'list': [], 'name': 'test tentative L2 velocity error', 'abrev': 'TestTE_L2', 'scale': True},
-            'u_H1': {'list': [], 'name': 'corrected velocity H1 error', 'abrev': 'CE_H1', 'scale': True,
+            'u_L2test': {'list': [], 'name': 'test corrected L2 velocity error', 'abrev': 'TestCE_L2', 'scale': self.factor},
+            'u2L2test': {'list': [], 'name': 'test tentative L2 velocity error', 'abrev': 'TestTE_L2', 'scale': self.factor},
+            'u_H1': {'list': [], 'name': 'corrected velocity H1 error', 'abrev': 'CE_H1', 'scale': self.factor,
                      'relative': 'av_norm_H1', 'slist': []},
-            'u_H1w': {'list': [], 'name': 'corrected velocity H1 error on wall', 'abrev': 'CE_H1w', 'scale': True,
+            'u_H1w': {'list': [], 'name': 'corrected velocity H1 error on wall', 'abrev': 'CE_H1w', 'scale': self.factor,
                      'relative': 'av_norm_H1w', 'slist': []},
-            'u2H1': {'list': [], 'name': 'tentative velocity H1 error', 'abrev': 'TE_H1', 'scale': True,
+            'u2H1': {'list': [], 'name': 'tentative velocity H1 error', 'abrev': 'TE_H1', 'scale': self.factor,
                      'relative': 'av_norm_H1', 'slist': []},
-            'u2H1w': {'list': [], 'name': 'tentative velocity H1 error on wall', 'abrev': 'TE_H1w', 'scale': True,
+            'u2H1w': {'list': [], 'name': 'tentative velocity H1 error on wall', 'abrev': 'TE_H1w', 'scale': self.factor,
                      'relative': 'av_norm_H1w', 'slist': []},
-            'u_H1test': {'list': [], 'name': 'test corrected H1 velocity error', 'abrev': 'TestCE_H1', 'scale': True},
-            'u2H1test': {'list': [], 'name': 'test tentative H1 velocity error', 'abrev': 'TestTE_H1', 'scale': True},
-            'd': {'list': [], 'name': 'corrected velocity L2 divergence', 'abrev': 'DC', 'scale': True, 'slist': []},
-            'd2': {'list': [], 'name': 'tentative velocity L2 divergence', 'abrev': 'DT', 'scale': True, 'slist': []},
-            'apg': {'list': [], 'name': 'analytic pressure gradient', 'abrev': 'APG', 'scale': True,
+            'u_H1test': {'list': [], 'name': 'test corrected H1 velocity error', 'abrev': 'TestCE_H1', 'scale': self.factor},
+            'u2H1test': {'list': [], 'name': 'test tentative H1 velocity error', 'abrev': 'TestTE_H1', 'scale': self.factor},
+            'd': {'list': [], 'name': 'corrected velocity L2 divergence', 'abrev': 'DC', 'scale': self.factor, 'slist': []},
+            'd2': {'list': [], 'name': 'tentative velocity L2 divergence', 'abrev': 'DT', 'scale': self.factor, 'slist': []},
+            'apg': {'list': [], 'name': 'analytic pressure gradient', 'abrev': 'APG', 'scale': self.factor,
                     'norm': self.pg_normalization_factor},
-            'av_norm_L2': {'list': [], 'name': 'analytic velocity L2 norm', 'abrev': 'AVN_L2', 'scale': False},
-            'av_norm_H1': {'list': [], 'name': 'analytic velocity H1 norm', 'abrev': 'AVN_H1', 'scale': False},
-            'av_norm_H1w': {'list': [], 'name': 'analytic velocity H1 norm on wall', 'abrev': 'AVN_H1w', 'scale': False},
-            'a_force_wall': {'list': [], 'name': 'analytic force on wall', 'abrev': 'AF', 'scale': False},
-            'a_force_wall_normal': {'list': [], 'name': 'analytic force on wall', 'abrev': 'AFN', 'scale': False},
-            'a_force_wall_shear': {'list': [], 'name': 'analytic force on wall', 'abrev': 'AFS', 'scale': False},
-            'force_wall': {'list': [], 'name': 'force error on wall', 'abrev': 'FE', 'scale': False,
+            'av_norm_L2': {'list': [], 'name': 'analytic velocity L2 norm', 'abrev': 'AVN_L2'},
+            'av_norm_H1': {'list': [], 'name': 'analytic velocity H1 norm', 'abrev': 'AVN_H1'},
+            'av_norm_H1w': {'list': [], 'name': 'analytic velocity H1 norm on wall', 'abrev': 'AVN_H1w'},
+            'a_force_wall': {'list': [], 'name': 'analytic force on wall', 'abrev': 'AF'},
+            'a_force_wall_normal': {'list': [], 'name': 'analytic force on wall', 'abrev': 'AFN'},
+            'a_force_wall_shear': {'list': [], 'name': 'analytic force on wall', 'abrev': 'AFS'},
+            'force_wall': {'list': [], 'name': 'force error on wall', 'abrev': 'FE',
                            'relative': 'a_force_wall', 'slist': []},
-            'force_wall_normal': {'list': [], 'name': 'normal force error on wall', 'abrev': 'FNE', 'scale': False,
+            'force_wall_normal': {'list': [], 'name': 'normal force error on wall', 'abrev': 'FNE',
                                   'relative': 'a_force_wall', 'slist': []},
-            'force_wall_shear': {'list': [], 'name': 'shear force error on wall', 'abrev': 'FSE', 'scale': False,
+            'force_wall_shear': {'list': [], 'name': 'shear force error on wall', 'abrev': 'FSE',
                                  'relative': 'a_force_wall', 'slist': []},
-            'ap_norm': {'list': [], 'name': 'analytic pressure norm', 'abrev': 'APN', 'scale': False},
-            'p': {'list': [], 'name': 'pressure L2(0) error', 'abrev': 'PE', 'scale': True, 'slist': [],
+            'ap_norm': {'list': [], 'name': 'analytic pressure norm', 'abrev': 'APN'},
+            'p': {'list': [], 'name': 'pressure L2(0) error', 'abrev': 'PE', 'scale': self.factor, 'slist': [],
                   'norm': self.p_normalization_factor},
-            'pg': {'list': [], 'name': 'computed pressure gradient', 'abrev': 'PG', 'scale': True,
+            'pg': {'list': [], 'name': 'computed pressure gradient', 'abrev': 'PG', 'scale': self.factor,
                    'norm': self.pg_normalization_factor},
-            'pgE': {'list': [], 'name': 'computed pressure gradient error', 'abrev': 'PGE', 'scale': True,
+            'pgE': {'list': [], 'name': 'computed pressure gradient error', 'abrev': 'PGE', 'scale': self.factor,
                     'norm': self.pg_normalization_factor, 'slist': []},
             'pgEA': {'list': [], 'name': 'computed absolute pressure gradient error', 'abrev': 'PGEA',
-                     'scale': True, 'norm': self.pg_normalization_factor},
-            'p2': {'list': [], 'name': 'pressure tent L2(0) error', 'abrev': 'PTE', 'scale': True,
+                     'scale': self.factor, 'norm': self.pg_normalization_factor},
+            'p2': {'list': [], 'name': 'pressure tent L2(0) error', 'abrev': 'PTE', 'scale': self.factor,
                    'slist': [], 'norm': self.p_normalization_factor},
-            'pg2': {'list': [], 'name': 'computed pressure tent gradient', 'abrev': 'PTG', 'scale': True,
+            'pg2': {'list': [], 'name': 'computed pressure tent gradient', 'abrev': 'PTG', 'scale': self.factor,
                     'norm': self.pg_normalization_factor},
             'pgE2': {'list': [], 'name': 'computed tent pressure tent gradient error', 'abrev': 'PTGE',
-                     'scale': True, 'norm': self.pg_normalization_factor, 'slist': []},
+                     'scale': self.factor, 'norm': self.pg_normalization_factor, 'slist': []},
             'pgEA2': {'list': [], 'name': 'computed absolute pressure tent gradient error',
-                      'abrev': 'PTGEA', 'scale': True, 'norm': self.pg_normalization_factor}
+                      'abrev': 'PTGEA', 'scale': self.factor, 'norm': self.pg_normalization_factor}
             }
 
     def __str__(self):
@@ -180,11 +184,11 @@ class Problem(object, gp.GeneralProblem):
     def get_boundary_conditions(self, V, Q, use_pressure_BC):
         # boundary parts: 1 walls, 2 inflow, 3 outflow
         noSlip = Constant((0.0, 0.0, 0.0))    # IMP fails when using direct import from UFL
-        if self.type == "steady":
-            self.v_in = Expression(("0.0", "0.0",
-                               "(t<0.5)?((sin(pi*t))*factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))):\
-                               (factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1])))"),
-                              t=0, factor=self.factor)
+        # if self.type == "steady":   # NT Steady
+        #     self.v_in = Expression(("0.0", "0.0",
+        #                        "(t<0.5)?((sin(pi*t))*factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))):\
+        #                        (factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1])))"),
+        #                       t=0, factor=self.factor)
 
         # Boundary conditions
         bc0 = DirichletBC(V, noSlip, self.facet_function, 1)
@@ -222,21 +226,21 @@ class Problem(object, gp.GeneralProblem):
 
             # Update boundary condition
             self.tc.start('updateBC')
-            if self.type == "steady":
-                self.v_in.t = self.actual_time
-            else:
-                self.v_in.assign(self.solution)
+            # if self.type == "steady":  NT Steady
+            #     self.v_in.t = self.actual_time
+            # else:
+            self.v_in.assign(self.solution)
             self.tc.end('updateBC')
 
-            # self.tc.start('analyticVnorms')
-            # self.analytic_v_norm_L2 = norm(self.solution, norm_type='L2')
-            # self.analytic_v_norm_H1 = norm(self.solution, norm_type='H1')
-            # self.analytic_v_norm_H1w = sqrt(assemble((inner(grad(self.solution), grad(self.solution)) +
-            #                                           inner(self.solution, self.solution)) * self.dsWall))
-            # self.listDict['av_norm_L2']['list'].append(self.analytic_v_norm_L2)
-            # self.listDict['av_norm_H1']['list'].append(self.analytic_v_norm_H1)
-            # self.listDict['av_norm_H1w']['list'].append(self.analytic_v_norm_H1w)
-            # self.tc.end('analyticVnorms')
+            self.tc.start('analyticVnorms')
+            self.analytic_v_norm_L2 = norm(self.solution, norm_type='L2')
+            self.analytic_v_norm_H1 = norm(self.solution, norm_type='H1')
+            self.analytic_v_norm_H1w = sqrt(assemble((inner(grad(self.solution), grad(self.solution)) +
+                                                      inner(self.solution, self.solution)) * self.dsWall))
+            self.listDict['av_norm_L2']['list'].append(self.analytic_v_norm_L2)
+            self.listDict['av_norm_H1']['list'].append(self.analytic_v_norm_H1)
+            self.listDict['av_norm_H1w']['list'].append(self.analytic_v_norm_H1w)
+            self.tc.end('analyticVnorms')
 
     def assemble_solution(self, t):  # returns Womersley sol for time t
         if self.tc is not None:
@@ -274,6 +278,57 @@ class Problem(object, gp.GeneralProblem):
         if self.doSaveDiff and t > 0.00001:  # NT maybe not needed, if solution is initialized before first save...
             self.vFunction.assign((1.0 / self.vel_normalization_factor[0]) * (field - self.solution))
             self.fileDict['u2D' if is_tent else 'uD']['file'] << self.vFunction
+
+    def compute_err(self, is_tent, velocity, t):
+        if self.doErrControl:
+            er_list_L2 = self.listDict['u2L2' if is_tent else 'u_L2']['list']
+            er_list_H1 = self.listDict['u2H1' if is_tent else 'u_H1']['list']
+            er_list_H1w = self.listDict['u2H1w' if is_tent else 'u_H1w']['list']
+            if self.testErrControl:
+                er_list_test_H1 = self.listDict['u2H1test' if is_tent else 'u_H1test']['list']
+                er_list_test_L2 = self.listDict['u2L2test' if is_tent else 'u_L2test']['list']
+            # if self.isSteadyFlow: NT Steady
+            #     if self.testErrControl:
+            #         self.tc.start('errorVtest')
+            #         er_list_test_L2.append(errornorm(velocity, self.solution, norm_type='L2', degree_rise=0))
+            #         er_list_test_H1.append(errornorm(velocity, self.solution, norm_type='H1', degree_rise=0))
+            #         self.tc.end('errorVtest')
+            #     self.tc.start('errorV')
+            #     er_list_L2.append(assemble(inner(velocity - self.solution, velocity - self.solution) * dx))  # faster
+            #     self.tc.end('errorV')
+            # else:
+            if self.testErrControl:
+                self.tc.start('errorVtest')
+                er_list_test_L2.append(errornorm(velocity, self.solution, norm_type='L2', degree_rise=0))
+                er_list_test_H1.append(errornorm(velocity, self.solution, norm_type='H1', degree_rise=0))
+                self.tc.end('errorVtest')
+            self.tc.start('errorV')
+            errorL2_sq = assemble(inner(velocity - self.solution, velocity - self.solution) * dx)  # faster than errornorm
+            errorH1seminorm_sq = assemble(inner(grad(velocity - self.solution), grad(velocity - self.solution)) * dx)  # faster than errornorm
+            print('  H1 seminorm error:', sqrt(errorH1seminorm_sq))
+            errorL2 = sqrt(errorL2_sq)
+            errorH1 = sqrt(errorL2_sq + errorH1seminorm_sq)
+            print("  Relative L2 error in velocity = ", errorL2 / self.analytic_v_norm_L2)
+            self.last_error = errorH1 / self.analytic_v_norm_H1
+            self.last_status_functional = self.last_error
+            print("  Relative H1 error in velocity = ", self.last_error)
+            er_list_L2.append(errorL2)
+            er_list_H1.append(errorH1)
+            errorH1wall = sqrt(assemble((inner(grad(velocity - self.solution), grad(velocity - self.solution)) +
+                                         inner(velocity - self.solution, velocity - self.solution)) * self.dsWall))
+            er_list_H1w.append(errorH1wall)
+            print('  Relative H1wall error:', errorH1wall / self.analytic_v_norm_H1w)
+            self.tc.end('errorV')
+            if self.isWholeSecond:
+                self.listDict['u2L2' if is_tent else 'u_L2']['slist'].append(
+                    sqrt(sum([i*i for i in er_list_L2[self.N0:self.N1]])/self.stepsInSecond))
+                self.listDict['u2H1' if is_tent else 'u_H1']['slist'].append(
+                    sqrt(sum([i*i for i in er_list_H1[self.N0:self.N1]])/self.stepsInSecond))
+                self.listDict['u2H1w' if is_tent else 'u_H1w']['slist'].append(
+                    sqrt(sum([i*i for i in er_list_H1w[self.N0:self.N1]])/self.stepsInSecond))
+            # stopping criteria
+            if self.last_error > self.divergence_treshold:
+                self.report_divergence(t)
 
     def save_pressure(self, is_tent, pressure):
         super(Problem, self).save_pressure(is_tent, pressure)
