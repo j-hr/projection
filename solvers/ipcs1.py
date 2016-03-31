@@ -53,7 +53,6 @@ class Solver(gs.GeneralSolver):
         self.problem = problem
         doSave = problem.doSave
 
-        self.tc.start('init')
         nu = Constant(self.problem.nu)
         # TODO check proper use of watches
         self.tc.init_watch('init', 'Initialization', True)
@@ -68,17 +67,22 @@ class Solver(gs.GeneralSolver):
         self.tc.init_watch('solve 3', 'Running solver on 3rd step', True)
         self.tc.init_watch('solve 4', 'Running solver on 4th step', True)
         self.tc.init_watch('assembleA1', 'Assembled A1 matrix', True)
-        self.tc.init_watch('computePG', 'Computed pressure gradient', True)
         self.tc.init_watch('next', 'Next step assignments', True)
+        self.tc.init_watch('saveVel', 'Saved velocity', True)
+
+        self.tc.start('init')
 
         # Define function spaces (P2-P1)
         mesh = self.problem.mesh
         self.V = VectorFunctionSpace(mesh, "Lagrange", 2)  # velocity
         self.Q = FunctionSpace(mesh, "Lagrange", 1)  # pressure
         self.PS = FunctionSpace(mesh, "Lagrange", 2)  # partial solution (must be same order as V)
+        self.D = FunctionSpace(mesh, "Lagrange", 1)   # velocity divergence space
         if self.bc == 'lagrange':
             L = FunctionSpace(mesh, "R", 0)
             QL = self.Q*L
+
+        problem.initialize(self.V, self.Q, self.PS, self.D)
 
         # Define trial and test functions
         u = TrialFunction(self.V)
@@ -94,9 +98,9 @@ class Solver(gs.GeneralSolver):
         u0, p0 = self.problem.get_initial_conditions(self.V, self.Q)
         u1 = u0
 
-        # if doSave:
-        #     rm.save_vel(False, u0, 0.0)
-        #     rm.save_vel(True, u0, 0.0)
+        if doSave:
+            problem.save_vel(False, u0, 0.0)
+            problem.save_vel(True, u0, 0.0)
 
         u_ = Function(self.V)         # current tentative velocity
         u_cor = Function(self.V)         # current corrected velocity
@@ -211,8 +215,6 @@ class Solver(gs.GeneralSolver):
         if self.bc == 'lagrange':
             fa = FunctionAssigner(self.Q, QL.sub(0))
 
-        problem.initialize(self.V, self.Q, self.PS)
-
         # boundary conditions
         bcu, bcp = problem.get_boundary_conditions(self.V, self.Q, self.bc == 'outflow')
         self.tc.end('init')
@@ -247,12 +249,12 @@ class Solver(gs.GeneralSolver):
                 problem.report_fail(t)
                 exit()
             problem.compute_err(True, u_, t)
-            # rm.compute_div(True, u_)
+            problem.compute_div(True, u_)
             if doSave:
                 self.tc.start('saveVel')
                 problem.save_vel(True, u_, t)
                 self.tc.end('saveVel')
-            #     rm.save_div(True, u_)
+                problem.save_div(True, u_)
             end()
 
             if self.useRotationScheme:
@@ -315,10 +317,12 @@ class Solver(gs.GeneralSolver):
                 problem.report_fail(t)
                 exit()
             problem.compute_err(False, u_cor, t)
-            # rm.compute_div(False, u_cor)
+            problem.compute_div(False, u_cor)
             if doSave:
+                self.tc.start('saveVel')
                 problem.save_vel(False, u_cor, t)
-            #     rm.save_div(False, u_cor)
+                self.tc.end('saveVel')
+                problem.save_div(False, u_cor)
             end()
 
             if self.useRotationScheme:
@@ -339,12 +343,9 @@ class Solver(gs.GeneralSolver):
                 self.tc.end('saveP')
                 end()
 
-            # plot(p_, title='tent')
-            # plot(p_mod, title='cor', interactive=True)
-            # exit()
-
-            # compute force on wall
-            # rm.compute_force(u_cor, p_mod if useRotationScheme else (pQ if args.bc == 'lagrange' else p_), n, t)  # NT clean somehow?
+            # compute functionals (e. g. forces)
+            problem.compute_functionals(u_cor,
+                                        p_mod if self.useRotationScheme else (pQ if self.bc == 'lagrange' else p_), t)
 
             # Move to next time step
             self.tc.start('next')

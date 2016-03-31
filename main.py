@@ -2,8 +2,7 @@ from __future__ import print_function
 
 import argparse
 import sys
-import problem as prb
-import results  # IMP Remove in the end (must separate TimeControl into new file)
+from time_control import TimeControl
 
 # Resolve input arguments===============================================================================================
 print(sys.argv)
@@ -29,7 +28,7 @@ print(args)
 print('Not parsed:', remaining)
 
 # initialize time control
-tc = results.TimeControl()
+tc = TimeControl()
 
 # initialize metadata
 metadata = {
@@ -44,8 +43,6 @@ metadata.update({  # QQ move into problem/solver init
     'solver': str(args.solver),
     'mesh_info': str(problem.mesh),
 })
-
-# rm = results.ResultsManager(problem, tc)  IMP results.py code must move into GeneralProblem/specific Problem class
 
 print("Problem:       " + args.problem)
 print("Solver:       " + args.solver)

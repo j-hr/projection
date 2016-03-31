@@ -5,6 +5,7 @@ import argparse
 
 import womersleyBC
 import results
+from time_control import TimeControl
 import problem as prb
 
 # TODO authors, license
@@ -31,7 +32,7 @@ import problem as prb
 #   c2: 6632 cells => h = 0.62 mm => 0.57 ms/factor
 #   c3: 53056 cells => h = 0.31 mm => 0.28 ms/factor
 
-tc = results.TimeControl()
+tc = TimeControl()
 tc.init_watch('init', 'Initialization', True)
 tc.init_watch('rhs', 'Assembled right hand side', True)
 tc.init_watch('updateBC', 'Updated velocity BC', True)

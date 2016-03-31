@@ -19,14 +19,13 @@ class Problem(object, gp.GeneralProblem):
 
         # TODO check if really used here
         self.tc.init_watch('assembleSol', 'Assembled analytic solution', True)
-        self.tc.init_watch('analyticP', 'Analytic pressure', True)
+        self.tc.init_watch('analyticP', 'Analytic pressure', False)
         self.tc.init_watch('analyticVnorms', 'Computed analytic velocity norms', True)
-        self.tc.init_watch('errorP', 'Computed pressure error', True)
+        self.tc.init_watch('errorP', 'Computed pressure error', False)
         self.tc.init_watch('errorV', 'Computed velocity error', True)
         self.tc.init_watch('errorForce', 'Computed force error', True)
         self.tc.init_watch('errorVtest', 'Computed velocity error test', True)
-        self.tc.init_watch('div', 'Computed and saved divergence', True)
-        self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
+        self.tc.init_watch('computePG', 'Computed pressure gradient', False)
 
         self.name = 'womersley_cylinder'
         self.status_functional_str = 'last H1 velocity error'
@@ -46,6 +45,7 @@ class Problem(object, gp.GeneralProblem):
         self.dsIn = Measure("ds", subdomain_id=2, subdomain_data=self.facet_function)
         self.dsOut = Measure("ds", subdomain_id=3, subdomain_data=self.facet_function)
         self.dsWall = Measure("ds", subdomain_id=1, subdomain_data=self.facet_function)
+        self.normal = FacetNormal(self.mesh)
         # QQ rm.dsWall = dsWall
         print("Mesh name: ", args.mesh, "    ", self.mesh)
         print("Mesh norm max: ", self.mesh.hmax())
@@ -152,8 +152,8 @@ class Problem(object, gp.GeneralProblem):
         #   pulsePrec - u(0) from precomputed solution (steady Stokes problem)
         parser.add_argument('-F', '--factor', help='Velocity scale factor', type=float, default=1.0)
 
-    def initialize(self, V, Q, PS):
-        super(Problem, self).initialize(V, Q, PS)
+    def initialize(self, V, Q, PS, D):
+        super(Problem, self).initialize(V, Q, PS, D)
 
         print("Problem type: " + self.type)
         print("Velocity scale factor = %4.2f" % self.factor)
@@ -173,7 +173,7 @@ class Problem(object, gp.GeneralProblem):
         #         Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"), factor=self.factor), solution_space)
         #     print("Prepared analytic solution. Time: %f" % (toc() - temp))
 
-        # self.pg_normalization_factor.append(womersleyBC.average_analytic_pressure_grad(self.factor))
+        self.pg_normalization_factor.append(womersleyBC.average_analytic_pressure_grad(self.factor))
         self.p_normalization_factor.append(norm(
             interpolate(womersleyBC.average_analytic_pressure_expr(self.factor), self.pSpace), norm_type='L2'))
         self.vel_normalization_factor.append(norm(
@@ -329,6 +329,47 @@ class Problem(object, gp.GeneralProblem):
             # stopping criteria
             if self.last_error > self.divergence_treshold:
                 self.report_divergence(t)
+
+    def compute_functionals(self, velocity, pressure, t):
+        self.compute_force(velocity, pressure, t)
+
+
+
+
+    def compute_force(self, velocity, pressure, t):
+        self.tc.start('errorForce')
+        I = Identity(3)  # Identity tensor
+        def T(p, v):
+            return -p * I + 2.0 * self.nu * sym(grad(v))
+        error_force = sqrt(
+                assemble(inner((T(pressure, velocity) - T(self.sol_p, self.solution)) * self.normal,
+                               (T(pressure, velocity) - T(self.sol_p, self.solution)) * self.normal) * self.dsWall))
+        an_force = sqrt(assemble(inner(T(self.sol_p, self.solution) * self.normal,
+                                            T(self.sol_p, self.solution) * self.normal) * self.dsWall))
+        an_f_normal = sqrt(assemble(inner(inner(T(self.sol_p, self.solution) * self.normal, self.normal),
+                                               inner(T(self.sol_p, self.solution) * self.normal, self.normal)) * self.dsWall))
+        error_f_normal = sqrt(
+                assemble(inner(inner((T(self.sol_p, self.solution) - T(pressure, velocity)) * self.normal, self.normal),
+                               inner((T(self.sol_p, self.solution) - T(pressure, velocity)) * self.normal, self.normal)) * self.dsWall))
+        an_f_shear = sqrt(
+                assemble(inner((I - outer(self.normal, self.normal)) * T(self.sol_p, self.solution) * self.normal,
+                               (I - outer(self.normal, self.normal)) * T(self.sol_p, self.solution) * self.normal) * self.dsWall))
+        error_f_shear = sqrt(
+                assemble(inner((I - outer(self.normal, self.normal)) *
+                               (T(self.sol_p, self.solution) - T(pressure, velocity)) * self.normal,
+                               (I - outer(self.normal, self.normal)) *
+                               (T(self.sol_p, self.solution) - T(pressure, velocity)) * self.normal) * self.dsWall))
+        self.listDict['a_force_wall']['list'].append(an_force)
+        self.listDict['a_force_wall_normal']['list'].append(an_f_normal)
+        self.listDict['a_force_wall_shear']['list'].append(an_f_shear)
+        self.listDict['force_wall']['list'].append(error_force)
+        self.listDict['force_wall_normal']['list'].append(error_f_normal)
+        self.listDict['force_wall_shear']['list'].append(error_f_shear)
+        if self.isWholeSecond:
+            self.listDict['force_wall']['slist'].append(
+                sqrt(sum([i*i for i in self.listDict['force_wall']['list'][self.N0:self.N1]])/self.stepsInSecond))
+        print('  Relative force error:', error_force/an_force)
+        self.tc.end('errorForce')
 
     def save_pressure(self, is_tent, pressure):
         super(Problem, self).save_pressure(is_tent, pressure)

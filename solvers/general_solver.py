@@ -13,6 +13,7 @@ class GeneralSolver:
         self.V = None
         self.Q = None
         self.PS = None
+        self.D = None
 
     @staticmethod
     def setup_parser_options(parser):

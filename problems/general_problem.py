@@ -1,10 +1,10 @@
 from __future__ import print_function
 import os, sys, traceback
 import csv, cPickle
-from dolfin import Function, assemble, interpolate, Expression
+from dolfin import Function, assemble, interpolate, Expression, project, norm
 from dolfin.cpp.common import mpi_comm_world, toc
 from dolfin.cpp.io import XDMFFile
-from ufl import dx
+from ufl import dx, div
 from math import sqrt
 
 class GeneralProblem:
@@ -14,6 +14,8 @@ class GeneralProblem:
         self.tc.init_watch('saveP', 'Saved pressure', True)
         self.tc.init_watch('saveVel', 'Saved velocity', True)
         self.tc.init_watch('averageP', 'Averaged pressure', False)   # falls within saveP
+        self.tc.init_watch('div', 'Computed and saved divergence', True)
+        self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
 
         self.args = args
         self.metadata = metadata
@@ -33,6 +35,8 @@ class GeneralProblem:
         self.volume = None
         self.vSpace = None
         self.vFunction = None
+        self.divSpace = None
+        self.divFunction = None
         self.pSpace = None
         self.pFunction = None
         self.solutionSpace = None
@@ -106,17 +110,18 @@ class GeneralProblem:
         #   noSave: do not create .xdmf files with velocity, pressure, divergence
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=1.0)
 
-    def initialize(self, V, Q, PS):
+    def initialize(self, V, Q, PS, D):
         self.vSpace = V
+        self.divSpace = D
         self.pSpace = Q
         self.solutionSpace = V
         self.partialSolutionSpace = PS
         self.vFunction = Function(V)
+        self.divFunction = Function(D)
         self.pFunction = Function(Q)
         self.volume = assemble(interpolate(Expression("1.0"), Q) * dx)
 
         if self.doSave:
-            # self.D = FunctionSpace(mesh, "Lagrange", 1)
             # self.pgSpace = VectorFunctionSpace(mesh, "DG", 0)
             # self.pgFunction = Function(self.pgSpace)
             self.initialize_xdmf_files()
@@ -141,6 +146,22 @@ class GeneralProblem:
             value['file'] = XDMFFile(mpi_comm_world(), self.str_dir_name + "/" + value['name'] + ".xdmf")
             value['file'].parameters['rewrite_function_mesh'] = False  # saves lots of space (for use with static mesh)
 
+    # method for saving divergence (ensuring, that it will be one time line in ParaView)
+    def save_div(self, is_tent, field):
+        self.tc.start('div')
+        self.divFunction.assign(project(div(field), self.divSpace))
+        self.fileDict['d2' if is_tent else 'd']['file'] << self.divFunction
+        self.tc.end('div')
+
+    def compute_div(self, is_tent, velocity):
+        self.tc.start('divNorm')
+        div_list = self.listDict['d2' if is_tent else 'd']['list']
+        div_list.append(norm(velocity, 'Hdiv0'))
+        if self.isWholeSecond:
+            self.listDict['d2' if is_tent else 'd']['slist'].append(
+                sum([i*i for i in div_list[self.N0:self.N1]])/self.stepsInSecond)
+        self.tc.end('divNorm')
+
     # method for saving velocity (ensuring, that it will be one time line in ParaView)
     def save_vel(self, is_tent, field, t):
         self.vFunction.assign(field)
@@ -162,7 +183,7 @@ class GeneralProblem:
     def save_pressure(self, is_tent, pressure):
         if self.doSave:
             self.fileDict['p2' if is_tent else 'p']['file'] << pressure
-            # pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)
+            # pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)  # NT normalisation factor defined only in Womersley
             # self.pgFunction.assign(pg)
             # self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
 
@@ -173,6 +194,9 @@ class GeneralProblem:
         pass
 
     def update_time(self, actual_time):
+        pass
+
+    def compute_functionals(self, velocity, pressure, t):
         pass
 
     def get_metadata_to_save(self):
