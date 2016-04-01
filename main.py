@@ -9,7 +9,7 @@ print(sys.argv)
 
 # IFNEED move time, dt into problem class
 parser = argparse.ArgumentParser()
-parser.add_argument('problem', help='Which problem to solve', choices=['womersley_cylinder', 'FaC3D_benchmark'])
+parser.add_argument('problem', help='Which problem to solve', choices=['womersley_cylinder', 'steady_cylinder', 'FaC3D_benchmark'])
 parser.add_argument('solver', help='Which solver to use', choices=['ipcs1'])
 parser.add_argument('mesh', help='Mesh name')
 parser.add_argument('time', help='Total time', type=int)

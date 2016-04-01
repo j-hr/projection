@@ -13,11 +13,10 @@ import womersleyBC
 class Problem(object, gp.GeneralProblem):
     def __init__(self, args, tc, metadata):
         self.has_analytic_solution = True
-        self.problem_code = 'WCYL'
+        self.problem_code = 'SCYL'
         gp.GeneralProblem.__init__(self, args, tc, metadata)
 
         # TODO check if really used here
-        self.tc.init_watch('assembleSol', 'Assembled analytic solution', True)
         self.tc.init_watch('analyticP', 'Analytic pressure', False)
         self.tc.init_watch('analyticVnorms', 'Computed analytic velocity norms', True)
         self.tc.init_watch('errorP', 'Computed pressure error', False)
@@ -26,7 +25,7 @@ class Problem(object, gp.GeneralProblem):
         self.tc.init_watch('errorVtest', 'Computed velocity error test', True)
         self.tc.init_watch('computePG', 'Computed pressure gradient', False)
 
-        self.name = 'womersley_cylinder'
+        self.name = 'steady_cylinder'
         self.status_functional_str = 'last H1 velocity error'
 
         # input parameters
@@ -35,7 +34,7 @@ class Problem(object, gp.GeneralProblem):
         self.scale_factor.append(self.factor)
 
         # fixed parameters (used in analytic solution and in BC)
-        self.nu = 3.71 * args.nu # kinematic viscosity
+        self.nu = 3.71 * args.nu  # kinematic viscosity
         self.R = 5.0  # cylinder radius
 
         # Import gmsh mesh
@@ -56,15 +55,9 @@ class Problem(object, gp.GeneralProblem):
         self.v_in = None
         self.area = None
 
-        choose_note = {1.0: '', 0.1: 'nuL10', 0.01: 'nuL100', 10.0: 'nuH10'}
-        self.precomputed_filename = args.mesh + choose_note[self.nu_factor]
-        print('chosen filename for precomputed solution', self.precomputed_filename)
-
-        # partial Bessel functions and coefficients
-        self.bessel_parabolic = None
-        self.bessel_real = []
-        self.bessel_complex = []
-        self.coefs_exp = [-8, -6, -4, -2, 2, 4, 6, 8]
+        self.analytic_v_norm_L2 = None
+        self.analytic_v_norm_H1 = None
+        self.analytic_v_norm_H1w = None
 
         self.listDict.update({
             'u_H1w': {'list': [], 'name': 'corrected velocity H1 error on wall', 'abrev': 'CE_H1w', 'scale': self.scale_factor,
@@ -84,7 +77,7 @@ class Problem(object, gp.GeneralProblem):
         })
 
     def __str__(self):
-        return 'womersley flow in cylinder'
+        return 'steady flow in cylinder'
 
     @staticmethod
     def setup_parser_options(parser):
@@ -102,12 +95,13 @@ class Problem(object, gp.GeneralProblem):
         reynolds = 728.761 * self.factor  # TODO modify by nu_factor
         print("Computing with Re = %f" % reynolds)
 
-        self.v_in = Function(V)
-        print('Initializing error control')
-        self.load_precomputed_bessel_functions(PS)
-
         # set constants for
         self.area = assemble(interpolate(Expression("1.0"), Q) * self.dsIn)  # inflow area
+
+        if self.doErrControl:
+            self.solution = interpolate(
+                Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"), factor=self.factor), self.vSpace)
+            print("Prepared analytic solution.")
 
         # womersley = steady + e^iCt, e^iCt has average 0
         self.pg_normalization_factor.append(womersleyBC.average_analytic_pressure_grad(self.factor))
@@ -115,11 +109,16 @@ class Problem(object, gp.GeneralProblem):
             interpolate(womersleyBC.average_analytic_pressure_expr(self.factor), self.pSpace), norm_type='L2'))
         self.vel_normalization_factor.append(norm(
             interpolate(womersleyBC.average_analytic_velocity_expr(self.factor), self.vSpace), norm_type='L2'))
-        # print('Normalisation factors (vel, p, pg):', self.vel_normalization_factor[0], self.p_normalization_factor[0],
-        #       self.pg_normalization_factor[0])
+
+        print('Normalisation factors (vel, p, pg):', self.vel_normalization_factor[0], self.p_normalization_factor[0],
+              self.pg_normalization_factor[0])
 
     def get_boundary_conditions(self, V, Q, use_pressure_BC):
         # boundary parts: 1 walls, 2 inflow, 3 outflow
+        self.v_in = Expression(("0.0", "0.0", "(t<0.5)?((sin(pi*t))*factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))):"
+                                              "(factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1])))"),
+                               t=0, factor=self.factor)
+
         # Boundary conditions
         bc0 = DirichletBC(V, (0.0, 0.0, 0.0), self.facet_function, 1)
         inflow = DirichletBC(V, self.v_in, self.facet_function, 2)
@@ -148,11 +147,9 @@ class Problem(object, gp.GeneralProblem):
         else:
             self.isWholeSecond = False
 
-        self.solution = self.assemble_solution(self.actual_time)
-
         # Update boundary condition
         self.tc.start('updateBC')
-        self.v_in.assign(self.solution)
+        self.v_in.t = self.actual_time
         self.tc.end('updateBC')
 
         self.tc.start('analyticVnorms')
@@ -164,37 +161,6 @@ class Problem(object, gp.GeneralProblem):
         self.listDict['av_norm_H1']['list'].append(self.analytic_v_norm_H1)
         self.listDict['av_norm_H1w']['list'].append(self.analytic_v_norm_H1w)
         self.tc.end('analyticVnorms')
-
-    def assemble_solution(self, t):  # returns Womersley sol for time t
-        if self.tc is not None:
-            self.tc.start('assembleSol')
-        sol = Function(self.solutionSpace)
-        dofs2 = self.solutionSpace.sub(2).dofmap().dofs()  # gives field of indices corresponding to z axis
-        sol.assign(Constant(("0.0", "0.0", "0.0")))  # QQ not needed
-        sol.vector()[dofs2] += self.factor * self.bessel_parabolic.vector().array()  # parabolic part of sol
-        for idx in range(8):  # add modes of Womersley sol
-            sol.vector()[dofs2] += self.factor * cos(self.coefs_exp[idx] * pi * t) * self.bessel_real[idx].vector().array()
-            sol.vector()[dofs2] += self.factor * -sin(self.coefs_exp[idx] * pi * t) * self.bessel_complex[idx].vector().array()
-        if self.tc is not None:
-            self.tc.end('assembleSol')
-        return sol
-
-    # load precomputed Bessel functions
-    def load_precomputed_bessel_functions(self, PS):
-        f = HDF5File(mpi_comm_world(), 'precomputed/precomputed_' + self.precomputed_filename + '.hdf5', 'r')
-        temp = toc()
-        fce = Function(PS)
-        f.read(fce, "parab")
-        self.bessel_parabolic = Function(fce)
-        for i in range(8):
-            f.read(fce, "real%d" % i)
-            self.bessel_real.append(Function(fce))
-            f.read(fce, "imag%d" % i)
-            self.bessel_complex.append(Function(fce))
-            # plot(coefs_r_prec[i], title="coefs_r_prec", interactive=True) # reasonable values
-            # plot(coefs_i_prec[i], title="coefs_i_prec", interactive=True) # reasonable values
-        # plot(c0_prec,title="c0_prec",interactive=True) # reasonable values
-        print("Loaded partial solution functions. Time: %f" % (toc() - temp))
 
     def compute_err(self, is_tent, velocity, t):
         super(Problem, self).compute_err(is_tent, velocity, t)
@@ -287,4 +253,3 @@ class Problem(object, gp.GeneralProblem):
             self.fileDict['p2D' if is_tent else 'pD']['file'] << self.pFunction
             # self.pgFunction.assign(pg-sol_pg)
             # self.fileDict['pg2D' if is_tent else 'pgD'][0] << self.pgFunction
-

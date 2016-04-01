@@ -1,11 +1,12 @@
 from __future__ import print_function
 import os, sys, traceback
 import csv, cPickle
-from dolfin import Function, assemble, interpolate, Expression, project, norm
+from dolfin import Function, assemble, interpolate, Expression, project, norm, errornorm
 from dolfin.cpp.common import mpi_comm_world, toc
 from dolfin.cpp.io import XDMFFile
-from ufl import dx, div
+from ufl import dx, div, inner, grad
 from math import sqrt
+
 
 class GeneralProblem:
     def __init__(self, args, tc, metadata):
@@ -40,6 +41,7 @@ class GeneralProblem:
         self.pSpace = None
         self.pFunction = None
         self.solutionSpace = None
+        self.solution = None
         self.partialSolutionSpace = None  # scalar space of same element type as velocity
         self.fileDict = {'u': {'name': 'velocity'},
                          'p': {'name': 'pressure'},
@@ -60,11 +62,67 @@ class GeneralProblem:
         self.N1 = None
         self.N0 = None
 
+        self.vel_normalization_factor = []
+        self.pg_normalization_factor = []
+        self.p_normalization_factor = []
+        self.scale_factor = []
+
+        self.analytic_v_norm_L2 = None
+        self.analytic_v_norm_H1 = None
+        self.analytic_v_norm_H1w = None
+
         # lists
-        # TODO document structure of listDict (part done in womersley_cylider)
         self.time_list = []  # list of times, when error is  measured (used in report)
         self.second_list = []
         self.listDict = {}  # list of fuctionals
+        # dictionary of data lists {list, name, abbreviation, add scaled row to report}
+        # normalisation coefficients (time-independent) are added to some lists to be used in normalized data series
+        #   coefficients are lists (updated during initialisation, so we cannot use float type)
+        #   coefs are equal to average of respective value of analytic solution
+        # norm lists (time-dependent normalisation coefficients) are added to some lists to be used in relative data
+        #  series (to remove natural pulsation of error due to change in volume flow rate)
+        # slist - lists for cycle-averaged values
+        # L2(0) means L2 difference of pressures taken with zero average
+        self.listDict = {
+            'd': {'list': [], 'name': 'corrected velocity L2 divergence', 'abrev': 'DC', 'scale': self.scale_factor, 'slist': []},
+            'd2': {'list': [], 'name': 'tentative velocity L2 divergence', 'abrev': 'DT', 'scale': self.scale_factor, 'slist': []},
+            'pg': {'list': [], 'name': 'computed pressure gradient', 'abrev': 'PG', 'scale': self.scale_factor,
+                   'norm': self.pg_normalization_factor},
+            'pg2': {'list': [], 'name': 'computed pressure tent gradient', 'abrev': 'PTG', 'scale': self.scale_factor,
+                    'norm': self.pg_normalization_factor},
+        }
+        if self.has_analytic_solution:
+            self.listDict.update({
+                'u_L2': {'list': [], 'name': 'corrected velocity L2 error', 'abrev': 'CE_L2', 'scale': self.scale_factor,
+                         'relative': 'av_norm_L2', 'slist': [], 'norm': self.vel_normalization_factor},
+                'u2L2': {'list': [], 'name': 'tentative velocity L2 error', 'abrev': 'TE_L2', 'scale': self.scale_factor,
+                         'relative': 'av_norm_L2', 'slist': [], 'norm': self.vel_normalization_factor},
+                'u_L2test': {'list': [], 'name': 'test corrected L2 velocity error', 'abrev': 'TestCE_L2', 'scale': self.scale_factor},
+                'u2L2test': {'list': [], 'name': 'test tentative L2 velocity error', 'abrev': 'TestTE_L2', 'scale': self.scale_factor},
+                'u_H1': {'list': [], 'name': 'corrected velocity H1 error', 'abrev': 'CE_H1', 'scale': self.scale_factor,
+                         'relative': 'av_norm_H1', 'slist': []},
+                'u2H1': {'list': [], 'name': 'tentative velocity H1 error', 'abrev': 'TE_H1', 'scale': self.scale_factor,
+                         'relative': 'av_norm_H1', 'slist': []},
+                'u_H1test': {'list': [], 'name': 'test corrected H1 velocity error', 'abrev': 'TestCE_H1', 'scale': self.scale_factor},
+                'u2H1test': {'list': [], 'name': 'test tentative H1 velocity error', 'abrev': 'TestTE_H1', 'scale': self.scale_factor},
+                'apg': {'list': [], 'name': 'analytic pressure gradient', 'abrev': 'APG', 'scale': self.scale_factor,
+                        'norm': self.pg_normalization_factor},
+                'av_norm_L2': {'list': [], 'name': 'analytic velocity L2 norm', 'abrev': 'AVN_L2'},
+                'av_norm_H1': {'list': [], 'name': 'analytic velocity H1 norm', 'abrev': 'AVN_H1'},
+                'ap_norm': {'list': [], 'name': 'analytic pressure norm', 'abrev': 'APN'},
+                'p': {'list': [], 'name': 'pressure L2(0) error', 'abrev': 'PE', 'scale': self.scale_factor, 'slist': [],
+                      'norm': self.p_normalization_factor},
+                'pgE': {'list': [], 'name': 'computed pressure gradient error', 'abrev': 'PGE', 'scale': self.scale_factor,
+                        'norm': self.pg_normalization_factor, 'slist': []},
+                'pgEA': {'list': [], 'name': 'computed absolute pressure gradient error', 'abrev': 'PGEA',
+                         'scale': self.scale_factor, 'norm': self.pg_normalization_factor},
+                'p2': {'list': [], 'name': 'pressure tent L2(0) error', 'abrev': 'PTE', 'scale': self.scale_factor,
+                       'slist': [], 'norm': self.p_normalization_factor},
+                'pgE2': {'list': [], 'name': 'computed tent pressure tent gradient error', 'abrev': 'PTGE',
+                         'scale': self.scale_factor, 'norm': self.pg_normalization_factor, 'slist': []},
+                'pgEA2': {'list': [], 'name': 'computed absolute pressure tent gradient error',
+                          'abrev': 'PTGEA', 'scale': self.scale_factor, 'norm': self.pg_normalization_factor}
+            })
 
         # parse arguments
         self.nu_factor = args.nu
@@ -99,7 +157,6 @@ class GeneralProblem:
         # create directory, needed because of using "with open(..." construction later
         if not os.path.exists(self.str_dir_name):
             os.mkdir(self.str_dir_name)
-
 
     @staticmethod
     def setup_parser_options(parser):
@@ -166,9 +223,42 @@ class GeneralProblem:
     def save_vel(self, is_tent, field, t):
         self.vFunction.assign(field)
         self.fileDict['u2' if is_tent else 'u']['file'] << self.vFunction
+        if self.doSaveDiff and t > 0.000001:  # NT maybe not needed, if solution is initialized before first save...
+            self.vFunction.assign((1.0 / self.vel_normalization_factor[0]) * (field - self.solution))
+            self.fileDict['u2D' if is_tent else 'uD']['file'] << self.vFunction
 
     def compute_err(self, is_tent, velocity, t):
-        pass
+        if self.doErrControl and self.has_analytic_solution:
+            er_list_L2 = self.listDict['u2L2' if is_tent else 'u_L2']['list']
+            er_list_H1 = self.listDict['u2H1' if is_tent else 'u_H1']['list']
+            self.tc.start('errorV')
+            errorL2_sq = assemble(inner(velocity - self.solution, velocity - self.solution) * dx)  # faster than errornorm
+            errorH1seminorm_sq = assemble(inner(grad(velocity - self.solution), grad(velocity - self.solution)) * dx)  # faster than errornorm
+            print('  H1 seminorm error:', sqrt(errorH1seminorm_sq))
+            errorL2 = sqrt(errorL2_sq)
+            errorH1 = sqrt(errorL2_sq + errorH1seminorm_sq)
+            print("  Relative L2 error in velocity = ", errorL2 / self.analytic_v_norm_L2)
+            self.last_error = errorH1 / self.analytic_v_norm_H1
+            self.last_status_functional = self.last_error
+            print("  Relative H1 error in velocity = ", self.last_error)
+            er_list_L2.append(errorL2)
+            er_list_H1.append(errorH1)
+            self.tc.end('errorV')
+            if self.testErrControl:
+                er_list_test_H1 = self.listDict['u2H1test' if is_tent else 'u_H1test']['list']
+                er_list_test_L2 = self.listDict['u2L2test' if is_tent else 'u_L2test']['list']
+                self.tc.start('errorVtest')
+                er_list_test_L2.append(errornorm(velocity, self.solution, norm_type='L2', degree_rise=0))
+                er_list_test_H1.append(errornorm(velocity, self.solution, norm_type='H1', degree_rise=0))
+                self.tc.end('errorVtest')
+            if self.isWholeSecond:
+                self.listDict['u2L2' if is_tent else 'u_L2']['slist'].append(
+                    sqrt(sum([i*i for i in er_list_L2[self.N0:self.N1]])/self.stepsInSecond))
+                self.listDict['u2H1' if is_tent else 'u_H1']['slist'].append(
+                    sqrt(sum([i*i for i in er_list_H1[self.N0:self.N1]])/self.stepsInSecond))
+            # stopping criteria
+            if self.last_error > self.divergence_treshold:
+                self.report_divergence(t)
 
     def averaging_pressure(self, pressure):
         self.tc.start('averageP')
@@ -194,7 +284,8 @@ class GeneralProblem:
         pass
 
     def update_time(self, actual_time):
-        pass
+        self.actual_time = actual_time
+        self.time_list.append(self.actual_time)
 
     def compute_functionals(self, velocity, pressure, t):
         pass
@@ -224,7 +315,7 @@ class GeneralProblem:
                     abrev = l['abrev']
                     report_writer.writerow([md['name'], l['name'], abrev] + l['list'])
                     if 'scale' in l:
-                        temp_list = [i/l['scale'] for i in l['list']]
+                        temp_list = [i/l['scale'][0] for i in l['list']]
                         report_writer.writerow([md['name'], "scaled " + l['name'], abrev+"s"] + temp_list +
                                                ['scale factor:' + str(l['scale'])])
                     if 'norm' in l:
@@ -233,6 +324,7 @@ class GeneralProblem:
                             report_writer.writerow([md['name'], "normalized " + l['name'], abrev+"n"] + temp_list)
                         else:
                             print('Norm missing:', l)
+                            l['normalized_list_sec'] = []
                     if 'relative' in l:
                         norm_list = self.listDict[l['relative']]['list']
                         temp_list = [l['list'][i]/norm_list[i] for i in range(0, len(l['list']))]
@@ -251,7 +343,7 @@ class GeneralProblem:
                     value = l['slist']
                     report_writer.writerow([md['name'], l['name'], abrev] + value)
                     if 'scale' in l:
-                        temp_list = [i/l['scale'] for i in value]
+                        temp_list = [i/l['scale'][0] for i in value]
                         report_writer.writerow([md['name'], "scaled " + l['name'], abrev+"s"] + temp_list)
                     if 'norm' in l:
                         if l['norm']:
@@ -260,6 +352,7 @@ class GeneralProblem:
                             report_writer.writerow([md['name'], "normalized " + l['name'], abrev+"n"] + temp_list)
                         else:
                             print('Norm missing:', l)
+                            l['normalized_list_sec'] = []
                     if 'relative_list' in l:
                         temp_list = []
                         # print('relative second list of', l['abrev'])
