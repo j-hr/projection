@@ -209,7 +209,7 @@ class Solver(gs.GeneralSolver):
                         solver.parameters[key] = value
                     except KeyError:
                         print('Invalid option %s for KrylovSolver' % key)
-                        exit()
+                        return 1
                 solver.parameters['preconditioner']['structure'] = 'same'
 
         if self.bc == 'lagrange':
@@ -247,7 +247,7 @@ class Solver(gs.GeneralSolver):
                 self.tc.end('solve 1')
             except RuntimeError as inst:
                 problem.report_fail(t)
-                exit()
+                return 1
             problem.compute_err(True, u_, t)
             problem.compute_div(True, u_)
             if doSave:
@@ -279,7 +279,7 @@ class Solver(gs.GeneralSolver):
                 self.tc.end('solve 2')
             except RuntimeError as inst:
                 problem.report_fail(t)
-                exit()
+                return 1
             self.tc.start('saveP')
             if self.useRotationScheme:
                 foo = Function(self.Q)
@@ -315,7 +315,7 @@ class Solver(gs.GeneralSolver):
                 self.tc.end('solve 3')
             except RuntimeError as inst:
                 problem.report_fail(t)
-                exit()
+                return 1
             problem.compute_err(False, u_cor, t)
             problem.compute_div(False, u_cor)
             if doSave:
@@ -336,7 +336,7 @@ class Solver(gs.GeneralSolver):
                     self.tc.end('solve 4')
                 except RuntimeError as inst:
                     problem.report_fail(t)
-                    exit()
+                    return 1
                 self.tc.start('saveP')
                 problem.averaging_pressure(p_mod)
                 problem.save_pressure(False, p_mod)
@@ -364,4 +364,4 @@ class Solver(gs.GeneralSolver):
 
         info("Finished: Incremental pressure correction scheme n. 1")
         problem.report()
-
+        return 0

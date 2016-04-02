@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import argparse
 import sys
+import postprocessing
 from time_control import TimeControl
 
 # Resolve input arguments===============================================================================================
@@ -71,5 +72,9 @@ metadata.update({
     'time': ttime,
 })
 
-solver.solve(problem)
+r = solver.solve(problem)
+out = {0: 'Solver finished correctly.', 1: 'Solver failed, exception caught.'}
+print(out.get(r, 'UNCAUGHT ERROR IN SOLVE METHOD'))
 
+print('Post-processing')
+postprocessing.rewrite_xdmf_files(metadata)

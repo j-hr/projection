@@ -27,7 +27,9 @@ class GeneralProblem:
         # need to be specified in subclass constructor before calling this constructor
         # IMP this code looks awful: how to do it properly? Possibly move dependent steps to initialization?
         self.problem_code = self.problem_code
+        self.metadata['pcode'] = self.problem_code
         self.has_analytic_solution = self.has_analytic_solution
+        self.metadata['hasAnalyticSolution'] = self.has_analytic_solution
 
         self.last_status_functional = 0.0
         self.status_functional_str = 'to be defined in Problem class'
@@ -154,6 +156,7 @@ class GeneralProblem:
                 print("Error control on")
 
         self.str_dir_name = "%s_%s_results" % (self.problem_code, metadata['name'])
+        self.metadata['dir'] = self.str_dir_name
         # create directory, needed because of using "with open(..." construction later
         if not os.path.exists(self.str_dir_name):
             os.mkdir(self.str_dir_name)
@@ -200,7 +203,8 @@ class GeneralProblem:
                 self.fileDict.update(self.fileDictTentPDiff)
         # create files
         for key, value in self.fileDict.iteritems():
-            value['file'] = XDMFFile(mpi_comm_world(), self.str_dir_name + "/" + value['name'] + ".xdmf")
+            value['file'] = XDMFFile(mpi_comm_world(), self.str_dir_name + "/" + self.problem_code + '_' +
+                                     self.metadata['name'] + value['name'] + ".xdmf")
             value['file'].parameters['rewrite_function_mesh'] = False  # saves lots of space (for use with static mesh)
 
     # method for saving divergence (ensuring, that it will be one time line in ParaView)
