@@ -10,26 +10,24 @@ from math import sqrt
 
 class GeneralProblem:
     def __init__(self, args, tc, metadata):
-        self.tc = tc
+        self.metadata = metadata
 
+        # need to be specified in subclass init before calling this init
+        self.problem_code = self.problem_code
+        self.metadata['pcode'] = self.problem_code
+        self.has_analytic_solution = self.has_analytic_solution
+        self.metadata['hasAnalyticSolution'] = self.has_analytic_solution
+
+        self.args = args
+        self.tc = tc
         self.tc.init_watch('saveP', 'Saved pressure', True)
         self.tc.init_watch('saveVel', 'Saved velocity', True)
         self.tc.init_watch('averageP', 'Averaged pressure', False)   # falls within saveP
         self.tc.init_watch('div', 'Computed and saved divergence', True)
         self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
 
-        self.args = args
-        self.metadata = metadata
-
         # stopping criteria (for relative H1 velocity error norm) (if known)
         self.divergence_treshold = 10
-
-        # need to be specified in subclass constructor before calling this constructor
-        # IMP this code looks awful: how to do it properly? Possibly move dependent steps to initialization?
-        self.problem_code = self.problem_code
-        self.metadata['pcode'] = self.problem_code
-        self.has_analytic_solution = self.has_analytic_solution
-        self.metadata['hasAnalyticSolution'] = self.has_analytic_solution
 
         self.last_status_functional = 0.0
         self.status_functional_str = 'to be defined in Problem class'
@@ -60,6 +58,7 @@ class GeneralProblem:
         self.fileDictTentPDiff = {'p2D': {'name': 'pressure_tent_diff'}}
         #                          'pg2D': {'name': 'pressure_grad_tent_diff'}}
 
+        self.actual_time = 0.0
         self.isWholeSecond = None
         self.N1 = None
         self.N0 = None
@@ -227,7 +226,7 @@ class GeneralProblem:
     def save_vel(self, is_tent, field, t):
         self.vFunction.assign(field)
         self.fileDict['u2' if is_tent else 'u']['file'] << self.vFunction
-        if self.doSaveDiff and t > 0.000001:  # NT maybe not needed, if solution is initialized before first save...
+        if self.doSaveDiff:
             self.vFunction.assign((1.0 / self.vel_normalization_factor[0]) * (field - self.solution))
             self.fileDict['u2D' if is_tent else 'uD']['file'] << self.vFunction
 
@@ -281,10 +280,20 @@ class GeneralProblem:
             # self.pgFunction.assign(pg)
             # self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
 
-    def get_boundary_conditions(self, *args):
+    def get_boundary_conditions(self, use_pressure_BC):
         pass
 
-    def get_initial_conditions(self, *args):
+    def get_initial_conditions(self, function_list):
+        """
+        :param function_list: [{'type': 'v'/'p', 'time':-0.1},...]
+        :return: velocities and pressures in selected times
+        """
+        pass
+
+    def get_v_solution(self, t):
+        pass
+
+    def get_p_solution(self, t):
         pass
 
     def update_time(self, actual_time):

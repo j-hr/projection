@@ -105,6 +105,7 @@ class Problem(object, gp.GeneralProblem):
         self.v_in = Function(V)
         print('Initializing error control')
         self.load_precomputed_bessel_functions(PS)
+        self.solution = self.assemble_solution(0.0)
 
         # set constants for
         self.area = assemble(interpolate(Expression("1.0"), Q) * self.dsIn)  # inflow area
@@ -118,24 +119,39 @@ class Problem(object, gp.GeneralProblem):
         # print('Normalisation factors (vel, p, pg):', self.vel_normalization_factor[0], self.p_normalization_factor[0],
         #       self.pg_normalization_factor[0])
 
-    def get_boundary_conditions(self, V, Q, use_pressure_BC):
+    def get_boundary_conditions(self, use_pressure_BC):
         # boundary parts: 1 walls, 2 inflow, 3 outflow
         # Boundary conditions
-        bc0 = DirichletBC(V, (0.0, 0.0, 0.0), self.facet_function, 1)
-        inflow = DirichletBC(V, self.v_in, self.facet_function, 2)
+        bc0 = DirichletBC(self.vSpace, (0.0, 0.0, 0.0), self.facet_function, 1)
+        inflow = DirichletBC(self.vSpace, self.v_in, self.facet_function, 2)
         bcu = [inflow, bc0]
         bcp = []
         if use_pressure_BC:
-            outflow = DirichletBC(Q, 0.0, self.facet_function, 3)
+            outflow = DirichletBC(self.pSpace, 0.0, self.facet_function, 3)
             bcp = [outflow]
         return bcu, bcp
 
-    def get_initial_conditions(self, V, Q):
-        v0 = Function(V)
-        p0 = Function(Q)
-        # if self.ic == 'correct':         # TODO analytic u0
+    def get_initial_conditions(self, function_list):
+        out = []
+        for d in function_list:
+            if d['type'] == 'v':
+                f = Function(self.vSpace)
+                if self.ic == 'correct':
+                    f = self.assemble_solution(d['time'])
+            if d['type'] == 'p':
+                f = Function(self.pSpace)
+                if self.ic == 'correct':
+                    f = interpolate(womersleyBC.analytic_pressure(self.factor, d['time']), self.pSpace)
+            out.append(f)
+        return out
 
-        return v0, p0
+    def get_v_solution(self, t):
+        v = self.assemble_solution(t)
+        return v
+
+    def get_p_solution(self, t):
+        p = interpolate(womersleyBC.analytic_pressure(self.factor, t), self.pSpace)
+        return p
 
     def update_time(self, actual_time):
         super(Problem, self).update_time(actual_time)

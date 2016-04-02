@@ -1,10 +1,8 @@
 from __future__ import print_function
-from dolfin import assemble, interpolate, Expression, Function, DirichletBC, norm, errornorm, Constant
-from dolfin.cpp.common import toc, mpi_comm_world, DOLFIN_EPS
-from dolfin.cpp.io import HDF5File
+from dolfin import assemble, interpolate, Expression, Function, DirichletBC, norm, errornorm
 from dolfin.cpp.mesh import Mesh, MeshFunction
-from ufl import Measure, dx, cos, sin, FacetNormal, inner, grad, outer, Identity, sym
-from math import pi, sqrt
+from ufl import Measure, FacetNormal, inner, grad, outer, Identity, sym
+from math import sqrt
 
 from problems import general_problem as gp
 import womersleyBC
@@ -113,28 +111,49 @@ class Problem(object, gp.GeneralProblem):
         print('Normalisation factors (vel, p, pg):', self.vel_normalization_factor[0], self.p_normalization_factor[0],
               self.pg_normalization_factor[0])
 
-    def get_boundary_conditions(self, V, Q, use_pressure_BC):
+    def get_boundary_conditions(self, use_pressure_BC):
         # boundary parts: 1 walls, 2 inflow, 3 outflow
-        self.v_in = Expression(("0.0", "0.0", "(t<0.5)?((sin(pi*t))*factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))):"
-                                              "(factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1])))"),
-                               t=0, factor=self.factor)
+        if self.ic == 'zero':
+            self.v_in = Expression(("0.0", "0.0", "(t<0.5)?((sin(pi*t))*factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))):"
+                                                  "(factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1])))"),
+                                   t=0, factor=self.factor)
+        if self.ic == 'correct':
+            self.v_in = Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"),
+                                   factor=self.factor)
 
         # Boundary conditions
-        bc0 = DirichletBC(V, (0.0, 0.0, 0.0), self.facet_function, 1)
-        inflow = DirichletBC(V, self.v_in, self.facet_function, 2)
+        bc0 = DirichletBC(self.vSpace, (0.0, 0.0, 0.0), self.facet_function, 1)
+        inflow = DirichletBC(self.vSpace, self.v_in, self.facet_function, 2)
         bcu = [inflow, bc0]
         bcp = []
         if use_pressure_BC:
-            outflow = DirichletBC(Q, 0.0, self.facet_function, 3)
+            outflow = DirichletBC(self.pSpace, 0.0, self.facet_function, 3)
             bcp = [outflow]
         return bcu, bcp
 
-    def get_initial_conditions(self, V, Q):
-        v0 = Function(V)
-        p0 = Function(Q)
-        # if self.ic == 'correct':         # TODO analytic u0
+    def get_initial_conditions(self, function_list):
+        out = []
+        for d in function_list:
+            if d['type'] == 'v':
+                f = Function(self.vSpace)
+                if self.ic == 'correct':
+                    f = interpolate(Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"),
+                                               factor=self.factor), self.vSpace)
+            if d['type'] == 'p':
+                f = Function(self.pSpace)
+                if self.ic == 'correct':
+                    f = interpolate(womersleyBC.average_analytic_pressure_expr(self.factor), self.pSpace)
+            out.append(f)
+        return out
 
-        return v0, p0
+    def get_v_solution(self, t):
+        v = interpolate(Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"),
+                                   factor=self.factor), self.vSpace)
+        return v
+
+    def get_p_solution(self, t):
+        p = interpolate(womersleyBC.average_analytic_pressure_expr(self.factor), self.pSpace)
+        return p
 
     def update_time(self, actual_time):
         super(Problem, self).update_time(actual_time)
@@ -149,7 +168,8 @@ class Problem(object, gp.GeneralProblem):
 
         # Update boundary condition
         self.tc.start('updateBC')
-        self.v_in.t = self.actual_time
+        if not self.ic == 'correct':
+            self.v_in.t = self.actual_time
         self.tc.end('updateBC')
 
         self.tc.start('analyticVnorms')

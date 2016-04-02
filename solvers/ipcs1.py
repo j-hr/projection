@@ -52,6 +52,7 @@ class Solver(gs.GeneralSolver):
     def solve(self, problem):
         self.problem = problem
         doSave = problem.doSave
+        dt = self.metadata['dt']
 
         nu = Constant(self.problem.nu)
         # TODO check proper use of watches
@@ -95,8 +96,9 @@ class Solver(gs.GeneralSolver):
             q = TestFunction(self.Q)
 
         # Initial conditions: u0 velocity at previous time step u1 velocity two time steps back p0 previous pressure
-        u0, p0 = self.problem.get_initial_conditions(self.V, self.Q)
-        u1 = u0
+        [u1, u0, p0] = self.problem.get_initial_conditions([{'type': 'v', 'time': -dt},
+                                                          {'type': 'v', 'time': 0.0},
+                                                          {'type': 'p', 'time': 0.0}])
 
         if doSave:
             problem.save_vel(False, u0, 0.0)
@@ -216,11 +218,10 @@ class Solver(gs.GeneralSolver):
             fa = FunctionAssigner(self.Q, QL.sub(0))
 
         # boundary conditions
-        bcu, bcp = problem.get_boundary_conditions(self.V, self.Q, self.bc == 'outflow')
+        bcu, bcp = problem.get_boundary_conditions(self.bc == 'outflow')
         self.tc.end('init')
         # Time-stepping
         info("Running of Incremental pressure correction scheme n. 1")
-        dt = self.metadata['dt']
         ttime = self.metadata['time']
         t = dt
         while t < (ttime + dt/2.0):
