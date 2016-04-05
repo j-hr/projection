@@ -10,11 +10,11 @@ from problems import general_problem as gp
 import womersleyBC
 
 
-class Problem(object, gp.GeneralProblem):
+class Problem(gp.GeneralProblem):
     def __init__(self, args, tc, metadata):
         self.has_analytic_solution = True
         self.problem_code = 'WCYL'
-        gp.GeneralProblem.__init__(self, args, tc, metadata)
+        super(Problem, self).__init__(args, tc, metadata)
 
         # TODO check if really used here
         self.tc.init_watch('assembleSol', 'Assembled analytic solution', True)
@@ -88,7 +88,7 @@ class Problem(object, gp.GeneralProblem):
 
     @staticmethod
     def setup_parser_options(parser):
-        gp.GeneralProblem.setup_parser_options(parser)
+        super(Problem).setup_parser_options(parser)
         # QQ precomputed initial condition?
         # IFNEED smooth initial u0 v_in incompatibility via modification of v_in (options normal, smoothed)
         parser.add_argument('--ic', help='Initial condition', choices=['zero', 'correct'], default='zero')

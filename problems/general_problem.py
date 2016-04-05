@@ -8,7 +8,7 @@ from ufl import dx, div, inner, grad
 from math import sqrt
 
 
-class GeneralProblem:
+class GeneralProblem(object):
     def __init__(self, args, tc, metadata):
         self.metadata = metadata
 
@@ -380,15 +380,16 @@ class GeneralProblem:
         header_row = ["name", 'metadata', "totalTimeHours"]
         data_row = [md['name'], self.get_metadata_to_save(), total / 3600.0]
         for key in ['u_L2', 'u_H1', 'u_H1w', 'p', 'u2L2', 'u2H1', 'u2H1w', 'p2', 'pgE', 'pgE2', 'd', 'd2', 'force_wall']:
-            l = self.listDict[key]
-            header_row += ['last_cycle_'+l['abrev']]
-            data_row += [l['slist'][-1]] if l['slist'] else [0]
-            if 'relative_list_sec' in l:
-                header_row += ['last_cycle_'+l['abrev']+'r']
-                data_row += [l['relative_list_sec'][-1]]
-            elif key in ['p', 'p2']:
-                header_row += ['last_cycle_'+l['abrev']+'n']
-                data_row += [l['normalized_list_sec'][-1]] if l['normalized_list_sec'] else [0]
+            if key in self.listDict:
+                l = self.listDict[key]
+                header_row += ['last_cycle_'+l['abrev']]
+                data_row += [l['slist'][-1]] if l['slist'] else [0]
+                if 'relative_list_sec' in l:
+                    header_row += ['last_cycle_'+l['abrev']+'r']
+                    data_row += [l['relative_list_sec'][-1]]
+                elif key in ['p', 'p2']:
+                    header_row += ['last_cycle_'+l['abrev']+'n']
+                    data_row += [l['normalized_list_sec'][-1]] if l['normalized_list_sec'] else [0]
 
         # report without header
         with open(self.str_dir_name + "/report.csv", 'w') as reportFile:
