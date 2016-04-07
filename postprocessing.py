@@ -34,5 +34,19 @@ def rewrite_xdmf_files(metadata):
 
 
 def create_scripts(metadata):
-    os.chdir(metadata['dir'])
+    abspath = os.path.abspath(os.curdir)
+    template = open('../paraview_scripts/template_compare_vel_tent_cor.py', 'r')
+    out_file = open('compareveldiff.py', 'w')
+    for line in template:
+        fac = 1.0
+        if 'factor' in metadata:
+            fac = 0.003/metadata['factor']
+        line = line.replace('$FACTOR$', str(fac))
+        line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'velocity_tent.xdmf')
+        line = line.replace('$FILENAME2$', metadata['dir']+'/'+metadata['filename_base']+'velocity.xdmf')
+        line = line.replace('$VECTORNAME1$', metadata['name']+'velocity_tent')
+        line = line.replace('$VECTORNAME2$', metadata['name']+'velocity')
+        out_file.write(line)
+    template.close()
+    out_file.close()
 

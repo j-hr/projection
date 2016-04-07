@@ -32,6 +32,7 @@ class Problem(gp.GeneralProblem):
         # input parameters
         self.ic = args.ic
         self.factor = args.factor
+        self.metadata['factor'] = self.factor
         self.scale_factor.append(self.factor)
 
         # fixed parameters (used in analytic solution and in BC)
@@ -88,7 +89,7 @@ class Problem(gp.GeneralProblem):
 
     @staticmethod
     def setup_parser_options(parser):
-        super(Problem).setup_parser_options(parser)
+        super(Problem, Problem).setup_parser_options(parser)
         # QQ precomputed initial condition?
         # IFNEED smooth initial u0 v_in incompatibility via modification of v_in (options normal, smoothed)
         parser.add_argument('--ic', help='Initial condition', choices=['zero', 'correct'], default='zero')

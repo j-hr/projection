@@ -189,6 +189,9 @@ class GeneralProblem(object):
 
     def initialize_xdmf_files(self):
         print('  Initializing output files.')
+        # for creating paraview scripts
+        self.metadata['filename_base'] = self.problem_code + '_' + self.metadata['name']
+
         # assemble file dictionary
         if self.doSaveDiff:
             self.fileDict.update(self.fileDictDiff)

@@ -79,3 +79,4 @@ print(out.get(r, 'UNCAUGHT ERROR IN SOLVE METHOD'))
 
 print('Post-processing')
 postprocessing.rewrite_xdmf_files(metadata)
+postprocessing.create_scripts(metadata)
