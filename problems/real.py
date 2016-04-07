@@ -1,9 +1,9 @@
 from __future__ import print_function
-from dolfin import assemble, interpolate, Expression, Function, DirichletBC, norm, errornorm, Constant
+from dolfin import assemble, interpolate, Expression, Function, DirichletBC, norm, errornorm, Constant, plot
 from dolfin.cpp.common import toc, mpi_comm_world, DOLFIN_EPS
 from dolfin.cpp.function import near
 from dolfin.cpp.io import HDF5File
-from dolfin.cpp.mesh import Mesh, MeshFunction
+from dolfin.cpp.mesh import Mesh, MeshFunction, FacetFunction, vertices, facets
 from ufl import Measure, dx, cos, sin, FacetNormal, inner, grad, outer, Identity, sym
 from math import pi, sqrt
 
@@ -23,6 +23,7 @@ class Problem(gp.GeneralProblem):
         # input parameters
         self.ic = args.ic
         self.factor = args.factor
+        self.metadata['factor'] = self.factor
         self.scale_factor.append(self.factor)
 
         self.nu = 3.71 * args.nu  # kinematic viscosity
@@ -33,8 +34,10 @@ class Problem(gp.GeneralProblem):
             exit('Bad mesh, should be some from %s' % str(self.compatible_meshes))
 
         self.mesh = Mesh("meshes/" + args.mesh + ".xml")
+        tdim = self.mesh.topology().dim()
+        self.mesh.init(tdim-1, tdim)
         self.cell_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_physical_region.xml")
-        self.facet_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_facet_region.xml")
+        # self.facet_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_facet_region.xml")
         # self.dsIn = Measure("ds", subdomain_id=2, subdomain_data=self.facet_function)
         # self.dsOut = Measure("ds", subdomain_id=3, subdomain_data=self.facet_function)
         # self.dsWall = Measure("ds", subdomain_id=1, subdomain_data=self.facet_function)
@@ -42,6 +45,59 @@ class Problem(gp.GeneralProblem):
         print("Mesh name: ", args.mesh, "    ", self.mesh)
         print("Mesh norm max: ", self.mesh.hmax())
         print("Mesh norm min: ", self.mesh.hmin())
+
+        def point_in_subdomain(p):
+            if abs(p[1]+13.6391) < 0.05:
+                return 2  # inflow
+            elif abs(-0.838444*p[0]+0.544988*p[2]+12.558) < 0.05:
+                return 3  # outflow
+            elif abs(0.0933764*p[0] - 0.933764*p[1] - 0.345493*p[2] + 10.5996) < 0.05:
+                return 4  # inflow
+            elif abs(-p[0]+20.6585) < 0.05:
+                return 5  # outflow
+
+        # Create boundary markers
+        self.facet_function = FacetFunction("size_t", self.mesh)
+        for f in facets(self.mesh):
+            if f.exterior():
+                if all(point_in_subdomain(v.point()) == 2 for v in vertices(f)):
+                    self.facet_function[f] = 2
+                elif all(point_in_subdomain(v.point()) == 3 for v in vertices(f)):
+                    self.facet_function[f] = 3
+                elif all(point_in_subdomain(v.point()) == 4 for v in vertices(f)):
+                    self.facet_function[f] = 4
+                elif all(point_in_subdomain(v.point()) == 5 for v in vertices(f)):
+                    self.facet_function[f] = 5
+                else:
+                    self.facet_function[f] = 1
+
+        # plot(self.facet_function, interactive=True)
+        # exit()
+
+        # DATA normals, centerpoints, d (absolute coefs for ax+by+cz+d=0 equation), radius for prabolic profile
+        #  f_new_input = 2
+        # n_new_input = 0 1 0
+        # TTxyz = 1.59128 -13.6391 7.24912
+        # d = 13.6391
+        # rr = 1.01077
+        #
+        #  f_new_input = 3
+        # n_new_input = -0.838444 0 0.544988
+        # TTxyz = 11.3086 -0.985461 -5.64479
+        # d = 12.558
+        # rr = 0.897705
+        #
+        #  f_new_input = 4
+        # n_new_input = 0.0933764 -0.933764 -0.345493
+        # TTxyz = -4.02584 7.70146 8.77694
+        # d = 10.5996
+        # rr = 0.553786
+        #
+        #  f_new_input = 5
+        # n_new_input = -1 0 0
+        # TTxyz = 20.6585 -1.38651 -1.24815
+        # d = 20.6585
+        # rr = 0.798752
 
         self.actual_time = None
         self.v_in_2 = None
@@ -88,7 +144,7 @@ class Problem(gp.GeneralProblem):
             rad = float(sqrt(x_dist2+y_dist2+z_dist2))
             # do not evaluate on boundaries or outside of circle:
             velocity = 0 if near(rad, self.radius) or rad > self.radius else \
-                2*Problem.v_function(self.t)*(self.radius - rad)/self.radius   # QQ je centerline 2*prumerna?
+                2*self.factor*Problem.v_function(self.t)*(1.0 - rad*rad/(self.radius*self.radius))   # QQ je centerline 2*prumerna?
             value[0] = velocity * self.normal[0]
             value[1] = velocity * self.normal[1]
             value[2] = velocity * self.normal[2]
