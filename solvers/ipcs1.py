@@ -21,7 +21,7 @@ class Solver(gs.GeneralSolver):
         self.solver_vel = None
         self.solver_p = None
         self.solver_rot = None
-        self.nullspace = None
+        self.null_space = None
 
         # input parameters
         self.bc = args.bc
@@ -30,8 +30,9 @@ class Solver(gs.GeneralSolver):
         self.metadata['hasTentativeP'] = self.useRotationScheme
 
         self.B = args.B
-        self.prec = args.prec
-        self.precision = args.precision
+        self.preconditioner = args.precond
+        self.precision_v = args.pv
+        self.precision_p = args.pp
 
     def __str__(self):
         return 'ipcs1 - incremental pressure correction scheme with nonlinearity treated by Adam-Bashword + ' \
@@ -41,10 +42,11 @@ class Solver(gs.GeneralSolver):
     def setup_parser_options(parser):
         gs.GeneralSolver.setup_parser_options(parser)
         parser.add_argument('-s', '--solvers', help='Solvers', choices=['direct', 'krylov'], default='krylov')
-        parser.add_argument('-p', '--precision', help='Krylov solver precision', type=int, default=6)
+        parser.add_argument('--pv', help='velocity Krylov solver precision', type=int, default=6)
+        parser.add_argument('--pp', help='pressure Krylov solver precision', type=int, default=10)
         parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
                             choices=['outflow', 'nullspace', 'nullspace_s', 'lagrange'], default='outflow')
-        parser.add_argument('--prec', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu'],
+        parser.add_argument('--precond', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu'],
                             default='hypre_amg')
         parser.add_argument('-r', help='Use rotation scheme', action='store_true')
         parser.add_argument('-B', help='Use no BC in correction step', action='store_true')
@@ -185,11 +187,11 @@ class Solver(gs.GeneralSolver):
                 self.solver_rot = LUSolver('umfpack')
         else:
             self.solver_vel = KrylovSolver('gmres', 'ilu')   # nonsymetric > gmres  # IFNEED try hypre_amg
-            self.solver_p = KrylovSolver('cg', self.prec)          # symmetric > CG
+            self.solver_p = KrylovSolver('cg', self.preconditioner)          # symmetric > CG
             if self.useRotationScheme:
-                self.solver_rot = KrylovSolver('cg', self.prec)
+                self.solver_rot = KrylovSolver('cg', self.preconditioner)
 
-        solver_options = {'absolute_tolerance': 10E-12, 'relative_tolerance': 10**(-self.precision),
+        solver_options = {'absolute_tolerance': 10E-10,
                           'monitor_convergence': True, 'maximum_iterations': 500}
 
         # Get the nullspace if there are no pressure boundary conditions
@@ -198,11 +200,16 @@ class Solver(gs.GeneralSolver):
             null_vec = Vector(foo.vector())
             self.Q.dofmap().set(null_vec, 1.0)
             null_vec *= 1.0/null_vec.norm('l2')
-            null_space = VectorSpaceBasis([null_vec])
+            self.null_space = VectorSpaceBasis([null_vec])
             if self.bc == 'nullspace':
-                as_backend_type(A2).set_nullspace(null_space)
+                as_backend_type(A2).set_nullspace(self.null_space)
 
         # apply global options for Krylov solvers
+        self.solver_vel.parameters['relative_tolerance'] = 10**(-self.precision_v)
+        self.solver_p.parameters['relative_tolerance'] = 10**(-self.precision_p)
+        if self.useRotationScheme:
+            self.solver_rot.parameters['relative_tolerance'] = 10**(-self.precision_p)
+
         if self.solvers == 'krylov':
             for solver in [self.solver_vel, self.solver_p, self.solver_rot] if self.useRotationScheme else \
                     [self.solver_vel, self.solver_p]:
@@ -268,7 +275,7 @@ class Solver(gs.GeneralSolver):
             self.tc.start('applybcP')
             [bc.apply(A2, b) for bc in bcp]
             if self.bc in ['nullspace', 'nullspace_s']:
-                self.nullspace.orthogonalize(b)
+                self.null_space.orthogonalize(b)
             self.tc.end('applybcP')
             # print(A2, b, p_.vector())
             try:

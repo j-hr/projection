@@ -1,14 +1,12 @@
 from __future__ import print_function
-from dolfin import assemble, interpolate, Expression, Function, DirichletBC, norm, errornorm, Constant, plot
-from dolfin.cpp.common import toc, mpi_comm_world, DOLFIN_EPS
+
+from dolfin import assemble, Expression, Function, DirichletBC, plot
 from dolfin.cpp.function import near
-from dolfin.cpp.io import HDF5File
 from dolfin.cpp.mesh import Mesh, MeshFunction, FacetFunction, vertices, facets
-from ufl import Measure, dx, cos, sin, FacetNormal, inner, grad, outer, Identity, sym
-from math import pi, sqrt
+from math import sqrt
+from ufl import Measure, FacetNormal, inner, ds
 
 from problems import general_problem as gp
-import womersleyBC
 
 
 class Problem(gp.GeneralProblem):
@@ -18,7 +16,8 @@ class Problem(gp.GeneralProblem):
         super(Problem, self).__init__(args, tc, metadata)
 
         self.name = 'test on real mesh'
-        self.status_functional_str = 'not selected'
+        self.status_functional_str = 'outflow/inflow'
+        self.last_inflow = 0
 
         # input parameters
         self.ic = args.ic
@@ -37,9 +36,6 @@ class Problem(gp.GeneralProblem):
         tdim = self.mesh.topology().dim()
         self.mesh.init(tdim-1, tdim)
         self.cell_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_physical_region.xml")
-        # self.facet_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_facet_region.xml")
-        # self.dsIn = Measure("ds", subdomain_id=2, subdomain_data=self.facet_function)
-        # self.dsOut = Measure("ds", subdomain_id=3, subdomain_data=self.facet_function)
         # self.dsWall = Measure("ds", subdomain_id=1, subdomain_data=self.facet_function)
         self.normal = FacetNormal(self.mesh)
         print("Mesh name: ", args.mesh, "    ", self.mesh)
@@ -98,6 +94,18 @@ class Problem(gp.GeneralProblem):
         # TTxyz = 20.6585 -1.38651 -1.24815
         # d = 20.6585
         # rr = 0.798752
+
+        self.dsOut1 = Measure("ds", subdomain_id=3, subdomain_data=self.facet_function)
+        self.dsOut2 = Measure("ds", subdomain_id=5, subdomain_data=self.facet_function)
+        self.dsIn1 = Measure("ds", subdomain_id=2, subdomain_data=self.facet_function)
+        self.dsIn2 = Measure("ds", subdomain_id=4, subdomain_data=self.facet_function)
+        self.listDict.update({
+            'outflow': {'list': [], 'name': 'outflow rate', 'abrev': 'OUT', 'slist': []},
+            'outflow1': {'list': [], 'name': 'outflow rate back', 'abrev': 'OUT1', 'slist': []},
+            'outflow2': {'list': [], 'name': 'outflow rate front', 'abrev': 'OUT2', 'slist': []},
+            'inflow': {'list': [], 'name': 'inflow rate', 'abrev': 'IN', 'slist': []},
+            'oiratio': {'list': [], 'name': 'outflow/inflow ratio (mass conservation)', 'abrev': 'O/I', 'slist': []},
+        })
 
         self.actual_time = None
         self.v_in_2 = None
@@ -186,8 +194,9 @@ class Problem(gp.GeneralProblem):
         bcu = [inflow2, inflow4, bc0]
         bcp = []
         if use_pressure_BC:
-            outflow = DirichletBC(self.pSpace, 0.0, self.facet_function, 5)  # QQ or 3 or both?
-            bcp = [outflow]
+            outflow3 = DirichletBC(self.pSpace, 0.0, self.facet_function, 3)  # QQ or 3 or both?
+            outflow5 = DirichletBC(self.pSpace, 0.0, self.facet_function, 5)  # QQ or 3 or both?
+            bcp = [outflow3, outflow5]
         return bcu, bcp
 
     def get_initial_conditions(self, function_list):
@@ -215,7 +224,26 @@ class Problem(gp.GeneralProblem):
         self.tc.start('updateBC')
         self.v_in_2.t = actual_time
         self.v_in_4.t = actual_time
+        in1 = assemble(inner(self.v_in_2, self.normal)*self.dsIn1)
+        in2 = assemble(inner(self.v_in_4, self.normal)*self.dsIn2)
+        self.last_inflow = in1+in2
+        print('Inflow:', self.last_inflow)
+        self.listDict['inflow']['list'].append(self.last_inflow)
+
         self.tc.end('updateBC')
 
     def save_pressure(self, is_tent, pressure):
         super(Problem, self).save_pressure(is_tent, pressure)
+
+    def compute_functionals(self, velocity, pressure, t):
+        out1 = assemble(inner(velocity, self.normal)*self.dsOut1)
+        out2 = assemble(inner(velocity, self.normal)*self.dsOut2)
+        out = out1 + out2
+        self.listDict['outflow1']['list'].append(out1)
+        self.listDict['outflow2']['list'].append(out2)
+        self.listDict['outflow']['list'].append(out)
+        print('Outflow:', out)
+        self.last_status_functional = out/abs(self.last_inflow)
+        self.listDict['oiratio']['list'].append(self.last_status_functional)
+        print('Outflow/Inflow:', self.last_status_functional)
+

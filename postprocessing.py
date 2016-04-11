@@ -40,7 +40,7 @@ def create_scripts(metadata):
     for line in template:
         fac = 1.0
         if 'factor' in metadata:
-            fac = 0.003/metadata['factor']
+            fac = 0.001/metadata['factor']
         line = line.replace('$FACTOR$', str(fac))
         line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'velocity_tent.xdmf')
         line = line.replace('$FILENAME2$', metadata['dir']+'/'+metadata['filename_base']+'velocity.xdmf')
