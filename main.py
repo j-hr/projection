@@ -2,11 +2,15 @@ from __future__ import print_function
 
 import argparse
 import sys
+from dolfin import set_log_level, DEBUG
+
 import postprocessing
 from time_control import TimeControl
 
 # Resolve input arguments===============================================================================================
 print(sys.argv)
+
+# set_log_level(DEBUG)
 
 # IFNEED move time, dt, mesh into problem class
 parser = argparse.ArgumentParser()
@@ -74,7 +78,7 @@ metadata.update({
 })
 
 r = solver.solve(problem)
-out = {0: 'Solver finished correctly.', 1: 'Solver failed, exception caught.'}
+out = {0: 'Solver finished correctly.', 1: 'Solver failed or solution diverged, exception caught.'}
 print(out.get(r, 'UNCAUGHT ERROR IN SOLVE METHOD'))
 
 print('Post-processing')

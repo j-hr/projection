@@ -1,10 +1,10 @@
 from __future__ import print_function
 
-from dolfin import assemble, Expression, Function, DirichletBC, plot
+from dolfin import assemble, Expression, Function, DirichletBC, plot, interpolate
 from dolfin.cpp.function import near
 from dolfin.cpp.mesh import Mesh, MeshFunction, FacetFunction, vertices, facets
 from math import sqrt
-from ufl import Measure, FacetNormal, inner, ds
+from ufl import Measure, FacetNormal, inner, ds, div, transpose, grad, dx, sym
 
 from problems import general_problem as gp
 
@@ -67,6 +67,8 @@ class Problem(gp.GeneralProblem):
                 else:
                     self.facet_function[f] = 1
 
+        self.mesh_volume = 564.938845339
+
         # plot(self.facet_function, interactive=True)
         # exit()
 
@@ -107,6 +109,8 @@ class Problem(gp.GeneralProblem):
             'oiratio': {'list': [], 'name': 'outflow/inflow ratio (mass conservation)', 'abrev': 'O/I', 'slist': []},
         })
 
+        self.can_force_outflow = True
+
         self.actual_time = None
         self.v_in_2 = None
         self.v_in_2_normal = [0.0, 1.0, 0.0]
@@ -116,6 +120,16 @@ class Problem(gp.GeneralProblem):
         self.v_in_4_normal = [0.1, -1.0, -0.37]
         self.v_in_4_center = [-4.02584, 7.70146, 8.77694]
         self.v_in_4_r = 0.553786
+
+    def compute_outflow(self, velocity):
+        out = assemble(inner(velocity, self.normal)*self.dsOut1 + inner(velocity, self.normal)*self.dsOut2)
+        return out
+
+    def get_outflow_measures(self):
+        return [self.dsOut1, self.dsOut2]
+
+    def get_outflow_measure_form(self):
+        return self.dsOut1 + self.dsOut2
 
     def __str__(self):
         return 'test on real mesh'
@@ -135,11 +149,17 @@ class Problem(gp.GeneralProblem):
         self.v_in_2 = Problem.InputVelocityProfile(self.factor, self.v_in_2_center, self.v_in_2_normal, self.v_in_2_r)
         self.v_in_4 = Problem.InputVelocityProfile(self.factor, self.v_in_4_center, self.v_in_4_normal, self.v_in_4_r)
 
+        # TODO move to general using get_outflow_measures method
+        one = (interpolate(Expression('1.0'), Q))
+        self.outflow_area = assemble(one*self.dsOut1 + one*self.dsOut2)
+        print('Outflow area:', self.outflow_area)
+
     class InputVelocityProfile(Expression):
         def __init__(self, factor, center, normal, radius, **kwargs):
             # super(Expression, self).__init__()
             super(Problem.InputVelocityProfile, self).__init__(**kwargs)
-            self.t = 0.0
+            self.t = 0.
+            self.onset_factor = 1.
             self.factor = factor
             self.center = center
             self.radius = radius
@@ -152,7 +172,7 @@ class Problem(gp.GeneralProblem):
             rad = float(sqrt(x_dist2+y_dist2+z_dist2))
             # do not evaluate on boundaries or outside of circle:
             velocity = 0 if near(rad, self.radius) or rad > self.radius else \
-                2*self.factor*Problem.v_function(self.t)*(1.0 - rad*rad/(self.radius*self.radius))   # QQ je centerline 2*prumerna?
+                2.*self.onset_factor*self.factor*Problem.v_function(self.t)*(1.0 - rad*rad/(self.radius*self.radius))   # QQ je centerline 2*prumerna?
             value[0] = velocity * self.normal[0]
             value[1] = velocity * self.normal[1]
             value[2] = velocity * self.normal[2]
@@ -223,7 +243,9 @@ class Problem(gp.GeneralProblem):
         # Update boundary condition
         self.tc.start('updateBC')
         self.v_in_2.t = actual_time
+        self.v_in_2.onset_factor = self.onset_factor
         self.v_in_4.t = actual_time
+        self.v_in_4.onset_factor = self.onset_factor
         in1 = assemble(inner(self.v_in_2, self.normal)*self.dsIn1)
         in2 = assemble(inner(self.v_in_4, self.normal)*self.dsIn2)
         self.last_inflow = in1+in2
@@ -235,7 +257,11 @@ class Problem(gp.GeneralProblem):
     def save_pressure(self, is_tent, pressure):
         super(Problem, self).save_pressure(is_tent, pressure)
 
+    def save_vel(self, is_tent, field, t):
+        super(Problem, self).save_vel(is_tent, field, t)
+
     def compute_functionals(self, velocity, pressure, t):
+        super(Problem, self).compute_functionals(velocity, pressure, t)
         out1 = assemble(inner(velocity, self.normal)*self.dsOut1)
         out2 = assemble(inner(velocity, self.normal)*self.dsOut2)
         out = out1 + out2

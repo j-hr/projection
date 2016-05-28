@@ -1,10 +1,10 @@
 from __future__ import print_function
-from dolfin import Function, VectorFunctionSpace, FunctionSpace, assemble
+from dolfin import Function, VectorFunctionSpace, FunctionSpace, assemble, Expression, CellSize, DOLFIN_EPS
 from dolfin.cpp.common import info, begin, end
 from dolfin.cpp.function import FunctionAssigner
 from dolfin.cpp.la import LUSolver, KrylovSolver, as_backend_type, VectorSpaceBasis, Vector
-from dolfin.functions import TrialFunction, TestFunction, Constant
-from ufl import dot, dx, grad, system, div, inner
+from dolfin.functions import TrialFunction, TestFunction, Constant, FacetNormal
+from ufl import dot, dx, grad, system, div, inner, sym, Identity, transpose, nabla_grad, sqrt, Min
 
 import general_solver as gs
 
@@ -25,6 +25,21 @@ class Solver(gs.GeneralSolver):
 
         # input parameters
         self.bc = args.bc
+        self.forceOutflow = args.fo
+        self.useLaplace = args.laplace
+        self.bcv = 'NOT' if self.useLaplace else args.bcv
+        if self.bcv == 'CDN':
+            print('Using classical do nothing condition (Tn=0).')
+        if self.bcv == 'DDN':
+            print('Using directional do nothing condition (Tn=0.5*negative(u.n)u).')
+        if self.bcv == 'LAP':
+            print('Using laplace neutral condition (grad(u)n=0).')
+        self.stabCoef = args.stab
+        self.stabilize = (args.stab > DOLFIN_EPS)
+        if self.stabilize:
+            print('Used streamline-diffusion stabilization with coef.:', args.stab)
+        else:
+            print('No stabilization used.')
         self.solvers = args.solvers
         self.useRotationScheme = args.r
         self.metadata['hasTentativeP'] = self.useRotationScheme
@@ -50,6 +65,11 @@ class Solver(gs.GeneralSolver):
                             default='hypre_amg')
         parser.add_argument('-r', help='Use rotation scheme', action='store_true')
         parser.add_argument('-B', help='Use no BC in correction step', action='store_true')
+        parser.add_argument('--fo', help='Force Neumann outflow boundary for pressure', action='store_true')
+        parser.add_argument('--laplace', help='Use laplace(u) instead of div(symgrad(u))', action='store_true')
+        parser.add_argument('--stab', help='Use stabilization (positive constant)', type=float, default=0.)
+        parser.add_argument('--bcv', help='Oufflow BC for velocity (with stress formulation)',
+                            choices=['CDN', 'DDN', 'LAP'], default='CDN')
 
     def solve(self, problem):
         self.problem = problem
@@ -57,6 +77,7 @@ class Solver(gs.GeneralSolver):
         dt = self.metadata['dt']
 
         nu = Constant(self.problem.nu)
+        n = FacetNormal(self.problem.mesh)
         # TODO check proper use of watches
         self.tc.init_watch('init', 'Initialization', True)
         self.tc.init_watch('rhs', 'Assembled right hand side', True)
@@ -69,7 +90,8 @@ class Solver(gs.GeneralSolver):
         self.tc.init_watch('solve 2', 'Running solver on 2nd step', True)
         self.tc.init_watch('solve 3', 'Running solver on 3rd step', True)
         self.tc.init_watch('solve 4', 'Running solver on 4th step', True)
-        self.tc.init_watch('assembleA1', 'Assembled A1 matrix', True)
+        self.tc.init_watch('assembleA1', 'Assembled A1 matrix (without stabiliz.)', True)
+        self.tc.init_watch('assembleA1stab', 'Assembled A1 stabilization', True)
         self.tc.init_watch('next', 'Next step assignments', True)
         self.tc.init_watch('saveVel', 'Saved velocity', True)
 
@@ -97,6 +119,8 @@ class Solver(gs.GeneralSolver):
             p = TrialFunction(self.Q)
             q = TestFunction(self.Q)
 
+        I = Identity(u.geometric_dimension())
+
         # Initial conditions: u0 velocity at previous time step u1 velocity two time steps back p0 previous pressure
         [u1, u0, p0] = self.problem.get_initial_conditions([{'type': 'v', 'time': -dt},
                                                           {'type': 'v', 'time': 0.0},
@@ -121,16 +145,50 @@ class Solver(gs.GeneralSolver):
 
         # Define forms
         # step 1: Tentative velocity, solve to u_
-        U = 0.5*(u + u0)
-        U_ = 1.5*u0 - 0.5*u1
+        u_ext = 1.5*u0 - 0.5*u1  # extrapolation for convection term
 
-        nonlinearity = inner(dot(grad(U), U_), v)*dx
+        def nonlinearity(function):
+            return inner(dot(grad(function), u_ext), v) * dx
 
-        F1 = (1./k)*inner(u - u0, v)*dx + nonlinearity\
-            + nu*inner(grad(U), grad(v))*dx + inner(grad(p0), v)*dx\
-            - inner(f, v)*dx     # solve to u_
-        a1, L1 = system(F1)
+        def diffusion(fce):
+            if self.useLaplace:
+                return nu*inner(grad(fce), grad(v)) * dx
+            else:
+                form = inner(nu * 2 * sym(grad(fce)), sym(grad(v))) * dx
+                if self.bcv == 'CDN':
+                    return form
+                if self.bcv == 'LAP':
+                    return form - inner(nu*dot(grad(fce).T, n), v) * problem.get_outflow_measure_form()
+                if self.bcv == 'DDN':
+                    return form  # additional term must be added to non-constant part
 
+        def pressure_rhs():
+            if self.useLaplace or self.bcv == 'LAP':
+                return inner(p0, div(v)) * dx - inner(p0*n, v) * problem.get_outflow_measure_form()
+                # NT term inner(inner(p, n), v) is 0 when p=0 on outflow
+            else:
+                return inner(p0, div(v)) * dx
+
+        a1_const = (1./k)*inner(u, v)*dx + diffusion(0.5*u)
+        a1_change = nonlinearity(0.5*u)
+        if self.bcv == 'DDN':
+            a1_change += -0.5*Min(0., inner(u_ext, n))*inner(u, v)*problem.get_outflow_measure_form()
+            # IMP assembling this leads to RuntimeError: In instant.recompile: The module did not compile with command 'make VERBOSE=1',
+
+        # Stabilisation
+        if self.stabilize:
+            h = CellSize(mesh)
+            delta = Constant(self.stabCoef)*h/(sqrt(inner(u_ext, u_ext))+h)
+            # a1_stab = delta*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx    # IMP too expensive!
+            a1_stab = delta*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx(None, {'quadrature_degree': 6})
+            # QQ what is optimal quadrature degree?
+
+        L1 = (1./k)*inner(u0, v)*dx - nonlinearity(0.5*u0) - diffusion(0.5*u0) + pressure_rhs()
+        if self.bcv == 'DDN':
+            L1 += 0.5*Min(0., inner(u_ext, n))*inner(u0, v)*problem.get_outflow_measure_form()
+
+        outflow_area = Constant(problem.outflow_area)
+        need_outflow = Constant(0.0)
         if self.useRotationScheme:
             # Rotation scheme
             if self.bc == 'lagrange':
@@ -142,7 +200,13 @@ class Solver(gs.GeneralSolver):
             if self.bc == 'lagrange':
                 F2 = inner(grad(pQL - p0), grad(qQL))*dx + (1./k)*qQL*div(u_)*dx + pQL*lQL*dx + qQL*rQL*dx
             else:
-                F2 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
+                if self.forceOutflow and problem.can_force_outflow:
+                    print('Forcing outflow.')
+                    F2 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
+                    for m in problem.get_outflow_measures():
+                        F2 += (1./k)*(1./outflow_area)*need_outflow*q*m
+                else:
+                    F2 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
         a2, L2 = system(F2)
 
         # step 3: Finalize, solve to u_
@@ -173,7 +237,10 @@ class Solver(gs.GeneralSolver):
 
         # Assemble matrices
         self.tc.start('assembleMatrices')
-        A1 = assemble(a1)  # need to be here, so A1 stays one Python object during repeated assembly
+        A1_const = assemble(a1_const)  # need to be here, so A1 stays one Python object during repeated assembly
+        A1_change = A1_const.copy()  # copy to get matrix with same sparse structure (data will be overwriten)
+        if self.stabilize:
+            A1_stab = A1_const.copy()  # copy to get matrix with same sparse structure (data will be overwriten)
         A2 = assemble(a2)
         A3 = assemble(a3)
         if self.useRotationScheme:
@@ -192,7 +259,7 @@ class Solver(gs.GeneralSolver):
                 self.solver_rot = KrylovSolver('cg', self.preconditioner)
 
         solver_options = {'absolute_tolerance': 10E-10,
-                          'monitor_convergence': True, 'maximum_iterations': 500}
+                          'monitor_convergence': True, 'maximum_iterations': 1000}
 
         # Get the nullspace if there are no pressure boundary conditions
         foo = Function(self.Q)     # auxiliary vector for setting pressure nullspace
@@ -238,8 +305,15 @@ class Solver(gs.GeneralSolver):
 
             # assemble matrix (it depends on solution)
             self.tc.start('assembleA1')
-            assemble(a1, tensor=A1)  # tensor must by of type GenericMatrix before using this assemble
+            assemble(a1_change, tensor=A1_change)  # assembling into existing matrix is faster than assembling new one
+            A1 = A1_const.copy()  # we dont want to change A1_const
+            A1.axpy(1, A1_change, True)
             self.tc.end('assembleA1')
+            self.tc.start('assembleA1stab')
+            if self.stabilize:
+                assemble(a1_stab, tensor=A1_stab)  # assembling into existing matrix is faster than assembling new one
+                A1.axpy(1, A1_stab, True)
+            self.tc.end('assembleA1stab')
 
             # Compute tentative velocity step
             begin("Computing tentative velocity")
@@ -253,11 +327,11 @@ class Solver(gs.GeneralSolver):
                 self.tc.start('solve 1')
                 self.solver_vel.solve(A1, u_.vector(), b)
                 self.tc.end('solve 1')
+                problem.compute_err(True, u_, t)
+                problem.compute_div(True, u_)
             except RuntimeError as inst:
                 problem.report_fail(t)
                 return 1
-            problem.compute_err(True, u_, t)
-            problem.compute_div(True, u_)
             if doSave:
                 self.tc.start('saveVel')
                 problem.save_vel(True, u_, t)
@@ -269,6 +343,12 @@ class Solver(gs.GeneralSolver):
                 begin("Computing tentative pressure")
             else:
                 begin("Computing pressure")
+            if self.forceOutflow and problem.can_force_outflow:
+                out = problem.compute_outflow(u_)
+                print('Tentative outflow:', out)
+                n_o = -problem.last_inflow-out
+                print('Needed outflow:', n_o)
+                need_outflow.assign(n_o)
             self.tc.start('rhs')
             b = assemble(L2)
             self.tc.end('rhs')
@@ -288,7 +368,6 @@ class Solver(gs.GeneralSolver):
             except RuntimeError as inst:
                 problem.report_fail(t)
                 return 1
-            self.tc.start('saveP')
             if self.useRotationScheme:
                 foo = Function(self.Q)
                 if self.bc == 'lagrange':
@@ -306,7 +385,6 @@ class Solver(gs.GeneralSolver):
                 else:
                     problem.averaging_pressure(p_)
                     problem.save_pressure(False, p_)
-            self.tc.end('saveP')
             end()
 
             begin("Computing corrected velocity")
@@ -321,11 +399,11 @@ class Solver(gs.GeneralSolver):
                 self.tc.start('solve 3')
                 self.solver_vel.solve(A3, u_cor.vector(), b)
                 self.tc.end('solve 3')
+                problem.compute_err(False, u_cor, t)
+                problem.compute_div(False, u_cor)
             except RuntimeError as inst:
                 problem.report_fail(t)
                 return 1
-            problem.compute_err(False, u_cor, t)
-            problem.compute_div(False, u_cor)
             if doSave:
                 self.tc.start('saveVel')
                 problem.save_vel(False, u_cor, t)
@@ -345,10 +423,8 @@ class Solver(gs.GeneralSolver):
                 except RuntimeError as inst:
                     problem.report_fail(t)
                     return 1
-                self.tc.start('saveP')
                 problem.averaging_pressure(p_mod)
                 problem.save_pressure(False, p_mod)
-                self.tc.end('saveP')
                 end()
 
             # compute functionals (e. g. forces)

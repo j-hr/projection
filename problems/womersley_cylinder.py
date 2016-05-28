@@ -18,13 +18,13 @@ class Problem(gp.GeneralProblem):
 
         # TODO check if really used here
         self.tc.init_watch('assembleSol', 'Assembled analytic solution', True)
-        self.tc.init_watch('analyticP', 'Analytic pressure', False)
+        self.tc.init_watch('analyticP', 'Analytic pressure', True)
         self.tc.init_watch('analyticVnorms', 'Computed analytic velocity norms', True)
-        self.tc.init_watch('errorP', 'Computed pressure error', False)
+        self.tc.init_watch('errorP', 'Computed pressure error', True)
         self.tc.init_watch('errorV', 'Computed velocity error', True)
         self.tc.init_watch('errorForce', 'Computed force error', True)
         self.tc.init_watch('errorVtest', 'Computed velocity error test', True)
-        self.tc.init_watch('computePG', 'Computed pressure gradient', False)
+        self.tc.init_watch('computePG', 'Computed pressure gradient', True)
 
         self.name = 'womersley_cylinder'
         self.status_functional_str = 'last H1 velocity error'
@@ -38,6 +38,8 @@ class Problem(gp.GeneralProblem):
         # fixed parameters (used in analytic solution and in BC)
         self.nu = 3.71 * args.nu # kinematic viscosity
         self.R = 5.0  # cylinder radius
+
+        self.mesh_volume = pi*25.*20.
 
         # Import gmsh mesh
         self.mesh = Mesh("meshes/" + args.mesh + ".xml")
@@ -120,6 +122,10 @@ class Problem(gp.GeneralProblem):
         # print('Normalisation factors (vel, p, pg):', self.vel_normalization_factor[0], self.p_normalization_factor[0],
         #       self.pg_normalization_factor[0])
 
+        one = (interpolate(Expression('1.0'), Q))
+        self.outflow_area = assemble(one*self.dsOut)
+        print('Outflow area:', self.outflow_area)
+
     def get_boundary_conditions(self, use_pressure_BC):
         # boundary parts: 1 walls, 2 inflow, 3 outflow
         # Boundary conditions
@@ -145,6 +151,12 @@ class Problem(gp.GeneralProblem):
                     f = interpolate(womersleyBC.analytic_pressure(self.factor, d['time']), self.pSpace)
             out.append(f)
         return out
+
+    def get_outflow_measures(self):
+        return [self.dsOut]
+
+    def get_outflow_measure_form(self):
+        return self.dsOut
 
     def get_v_solution(self, t):
         v = self.assemble_solution(t)
@@ -225,6 +237,7 @@ class Problem(gp.GeneralProblem):
                 sqrt(sum([i*i for i in er_list_H1w[self.N0:self.N1]])/self.stepsInSecond))
 
     def compute_functionals(self, velocity, pressure, t):
+        super(Problem, self).compute_functionals(velocity, pressure, t)
         self.compute_force(velocity, pressure, t)
 
     def compute_force(self, velocity, pressure, t):

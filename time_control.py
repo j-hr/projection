@@ -78,6 +78,11 @@ class TimeControl:
             report_data.append(value[0]/total_time)
         report_header.append('part unmeasured')
         report_data.append((total_time-sum)/total_time)
-        writer = csv.writer(report_file, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
-        writer.writerow(report_header)
-        writer.writerow(report_data)
+        if report_file is not None:
+            writer = csv.writer(report_file, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
+            writer.writerow(report_header)
+            writer.writerow(report_data)
+
+    def report_print(self):
+        self.report(None, '')
+

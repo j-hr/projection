@@ -1,5 +1,7 @@
 from __future__ import print_function
 
+from dolfin import parameters
+
 
 class GeneralSolver:
     def __init__(self, args, tc, metadata):
@@ -15,9 +17,14 @@ class GeneralSolver:
         self.PS = None
         self.D = None
 
+        if args.ffc == 'auto_opt' or args.ffc == 'uflacs_opt':
+            parameters["form_compiler"]["optimize"] = True  # NT probably do nothing with uflacs
+        if args.ffc == 'uflacs' or args.ffc == 'uflacs_opt':
+            parameters["form_compiler"]["representation"] = "uflacs"
+
     @staticmethod
     def setup_parser_options(parser):
-        pass
+        parser.add_argument('--ffc', help='Form compiler options', choices=['auto_opt', 'uflacs', 'uflacs_opt'], default='auto_opt')
 
     def initialize(self, options):
         pass

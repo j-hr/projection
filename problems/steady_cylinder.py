@@ -2,7 +2,7 @@ from __future__ import print_function
 from dolfin import assemble, interpolate, Expression, Function, DirichletBC, norm, errornorm
 from dolfin.cpp.mesh import Mesh, MeshFunction
 from ufl import Measure, FacetNormal, inner, grad, outer, Identity, sym
-from math import sqrt
+from math import sqrt, pi
 
 from problems import general_problem as gp
 import womersleyBC
@@ -15,13 +15,14 @@ class Problem(gp.GeneralProblem):
         super(Problem, self).__init__(args, tc, metadata)
 
         # TODO check if really used here
-        self.tc.init_watch('analyticP', 'Analytic pressure', False)
+        self.tc.init_watch('assembleSol', 'Assembled analytic solution', True)
+        self.tc.init_watch('analyticP', 'Analytic pressure', True)
         self.tc.init_watch('analyticVnorms', 'Computed analytic velocity norms', True)
-        self.tc.init_watch('errorP', 'Computed pressure error', False)
+        self.tc.init_watch('errorP', 'Computed pressure error', True)
         self.tc.init_watch('errorV', 'Computed velocity error', True)
         self.tc.init_watch('errorForce', 'Computed force error', True)
         self.tc.init_watch('errorVtest', 'Computed velocity error test', True)
-        self.tc.init_watch('computePG', 'Computed pressure gradient', False)
+        self.tc.init_watch('computePG', 'Computed pressure gradient', True)
 
         self.name = 'steady_cylinder'
         self.status_functional_str = 'last H1 velocity error'
@@ -35,6 +36,8 @@ class Problem(gp.GeneralProblem):
         # fixed parameters (used in analytic solution and in BC)
         self.nu = 3.71 * args.nu  # kinematic viscosity
         self.R = 5.0  # cylinder radius
+
+        self.mesh_volume = pi*25.*20.
 
         # Import gmsh mesh
         self.mesh = Mesh("meshes/" + args.mesh + ".xml")
@@ -147,6 +150,12 @@ class Problem(gp.GeneralProblem):
             out.append(f)
         return out
 
+    def get_outflow_measures(self):
+        return [self.dsOut]
+
+    def get_outflow_measure_form(self):
+        return self.dsOut
+
     def get_v_solution(self, t):
         v = interpolate(Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"),
                                    factor=self.factor), self.vSpace)
@@ -195,6 +204,7 @@ class Problem(gp.GeneralProblem):
                 sqrt(sum([i*i for i in er_list_H1w[self.N0:self.N1]])/self.stepsInSecond))
 
     def compute_functionals(self, velocity, pressure, t):
+        super(Problem, self).compute_functionals(velocity, pressure, t)
         self.compute_force(velocity, pressure, t)
 
     def compute_force(self, velocity, pressure, t):

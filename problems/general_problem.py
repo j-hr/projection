@@ -4,8 +4,8 @@ import csv, cPickle
 from dolfin import Function, assemble, interpolate, Expression, project, norm, errornorm
 from dolfin.cpp.common import mpi_comm_world, toc
 from dolfin.cpp.io import XDMFFile
-from ufl import dx, div, inner, grad
-from math import sqrt
+from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl
+from math import sqrt, pi, cos
 
 
 class GeneralProblem(object):
@@ -22,13 +22,20 @@ class GeneralProblem(object):
         self.tc = tc
         self.tc.init_watch('saveP', 'Saved pressure', True)
         self.tc.init_watch('saveVel', 'Saved velocity', True)
-        self.tc.init_watch('averageP', 'Averaged pressure', False)   # falls within saveP
+        self.tc.init_watch('averageP', 'Averaged pressure', True)
         self.tc.init_watch('div', 'Computed and saved divergence', True)
         self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
+
+        # If it is sensible (and implemented) to force pressure gradient on outflow boundary
+        # 1. set self.outflow_area in initialize
+        # 2. implement self.compute_outflow and get_outflow_measures
+        self.can_force_outflow = False
+        self.outflow_area = None
 
         # stopping criteria (for relative H1 velocity error norm) (if known)
         self.divergence_treshold = 10
 
+        # used for writing status files .run to monitor progress during computation:
         self.last_status_functional = 0.0
         self.status_functional_str = 'to be defined in Problem class'
 
@@ -43,20 +50,6 @@ class GeneralProblem(object):
         self.solutionSpace = None
         self.solution = None
         self.partialSolutionSpace = None  # scalar space of same element type as velocity
-        self.fileDict = {'u': {'name': 'velocity'},
-                         'p': {'name': 'pressure'},
-                         # 'pg': {'name': 'pressure_grad'},
-                         'd': {'name': 'divergence'}}
-        self.fileDictTent = {'u2': {'name': 'velocity_tent'},
-                             'd2': {'name': 'divergence_tent'}}
-        self.fileDictDiff = {'uD': {'name': 'velocity_diff'},
-                             'pD': {'name': 'pressure_diff'},
-                             'pgD': {'name': 'pressure_grad_diff'}}
-        self.fileDictTentDiff = {'u2D': {'name': 'velocity_tent_diff'}}
-        self.fileDictTentP = {'p2': {'name': 'pressure_tent'}}
-        #                      'pg2': {'name': 'pressure_grad_tent'}}
-        self.fileDictTentPDiff = {'p2D': {'name': 'pressure_tent_diff'}}
-        #                          'pg2D': {'name': 'pressure_grad_tent_diff'}}
 
         self.actual_time = 0.0
         self.isWholeSecond = None
@@ -72,7 +65,25 @@ class GeneralProblem(object):
         self.analytic_v_norm_H1 = None
         self.analytic_v_norm_H1w = None
 
-        # lists
+        # dictionaries for output files
+        self.fileDict = {'u': {'name': 'velocity'},
+                         'p': {'name': 'pressure'},
+                         # 'pg': {'name': 'pressure_grad'},
+                         'd': {'name': 'divergence'}}
+        self.fileDictTent = {'u2': {'name': 'velocity_tent'},
+                             'd2': {'name': 'divergence_tent'}}
+        self.fileDictDiff = {'uD': {'name': 'velocity_diff'},
+                             'pD': {'name': 'pressure_diff'},
+                             'pgD': {'name': 'pressure_grad_diff'}}
+        self.fileDictTentDiff = {'u2D': {'name': 'velocity_tent_diff'}}
+        self.fileDictTentP = {'p2': {'name': 'pressure_tent'}}
+        #                      'pg2': {'name': 'pressure_grad_tent'}}
+        self.fileDictTentPDiff = {'p2D': {'name': 'pressure_tent_diff'}}
+        #                          'pg2D': {'name': 'pressure_grad_tent_diff'}}
+        self.fileDictLDSG = {'ldsg': {'name': 'ldsg'},
+                             'ldsg2': {'name': 'ldsg_tent'}}
+
+        # lists of functionals and other scalar output data
         self.time_list = []  # list of times, when error is  measured (used in report)
         self.second_list = []
         self.listDict = {}  # list of fuctionals
@@ -91,6 +102,8 @@ class GeneralProblem(object):
                    'norm': self.pg_normalization_factor},
             'pg2': {'list': [], 'name': 'computed pressure tent gradient', 'abrev': 'PTG', 'scale': self.scale_factor,
                     'norm': self.pg_normalization_factor},
+            'dsg-l': {'list': [], 'name': 'div(2sym(grad(u))-laplace(u))', 'abrev': 'DSG-L'},  # div(2sym(grad(u))-laplace(u))
+            'dgt': {'list': [], 'name': 'div(transpose(grad(u)))', 'abrev': 'DGT'},  # div(transpose(grad(u)))
         }
         if self.has_analytic_solution:
             self.listDict.update({
@@ -127,6 +140,8 @@ class GeneralProblem(object):
 
         # parse arguments
         self.nu_factor = args.nu
+        self.onset = args.onset
+        self.onset_factor = 0
 
         self.doSave = False
         self.doSaveDiff = False
@@ -168,6 +183,8 @@ class GeneralProblem(object):
         #   diff: save also difference vel-sol
         #   noSave: do not create .xdmf files with velocity, pressure, divergence
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=1.0)
+        parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.0)
+        parser.add_argument('--ldsg', help='save laplace(u) - div(2sym(grad(u))) difference', action='store_true')
 
     def initialize(self, V, Q, PS, D):
         self.vSpace = V
@@ -203,6 +220,8 @@ class GeneralProblem(object):
             self.fileDict.update(self.fileDictTentP)
             if self.doSaveDiff:
                 self.fileDict.update(self.fileDictTentPDiff)
+        if self.args.ldsg:
+            self.fileDict.update(self.fileDictLDSG)
         # create files
         for key, value in self.fileDict.iteritems():
             value['file'] = XDMFFile(mpi_comm_world(), self.str_dir_name + "/" + self.problem_code + '_' +
@@ -232,6 +251,13 @@ class GeneralProblem(object):
         if self.doSaveDiff:
             self.vFunction.assign((1.0 / self.vel_normalization_factor[0]) * (field - self.solution))
             self.fileDict['u2D' if is_tent else 'uD']['file'] << self.vFunction
+        if self.args.ldsg:
+            # print(div(2.*sym(grad(field))-grad(field)).ufl_shape)
+            form = div(2.*sym(grad(field))-grad(field))
+            self.pFunction.assign(project(sqrt_ufl(inner(form, form)), self.pSpace))
+            self.fileDict['ldsg2' if is_tent else 'ldsg']['file'] << self.pFunction
+            # self.vFunction.assign(project(div(2.*sym(grad(field))-grad(field)), self.vSpace))
+            # self.fileDict['ldsg2' if is_tent else 'ldsg']['file'] << self.vFunction
 
     def compute_err(self, is_tent, velocity, t):
         if self.doErrControl and self.has_analytic_solution:
@@ -264,7 +290,7 @@ class GeneralProblem(object):
                     sqrt(sum([i*i for i in er_list_H1[self.N0:self.N1]])/self.stepsInSecond))
             # stopping criteria
             if self.last_error > self.divergence_treshold:
-                self.report_divergence(t)
+                raise RuntimeError('STOPPED: Failed divergence test!')
 
     def averaging_pressure(self, pressure):
         self.tc.start('averageP')
@@ -277,11 +303,13 @@ class GeneralProblem(object):
         self.tc.end('averageP')
 
     def save_pressure(self, is_tent, pressure):
+        self.tc.start('saveP')
         if self.doSave:
             self.fileDict['p2' if is_tent else 'p']['file'] << pressure
             # pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)  # NT normalisation factor defined only in Womersley
             # self.pgFunction.assign(pg)
             # self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
+        self.tc.end('saveP')
 
     def get_boundary_conditions(self, use_pressure_BC):
         pass
@@ -302,8 +330,22 @@ class GeneralProblem(object):
     def update_time(self, actual_time):
         self.actual_time = actual_time
         self.time_list.append(self.actual_time)
+        if self.onset < 0.001 or self.actual_time > self.onset:
+            self.onset_factor = 1.
+        else:
+            self.onset_factor = (1. - cos(pi * actual_time / self.onset))*0.5
+        print('Onset factor:', self.onset_factor)
 
     def compute_functionals(self, velocity, pressure, t):
+        dsgml = sqrt(assemble((1./self.mesh_volume)*inner(div(2*sym(grad(velocity))-grad(velocity)), div(2*sym(grad(velocity))-grad(velocity)))*dx))
+        dgt = sqrt(assemble((1./self.mesh_volume)*inner(div(transpose(grad(velocity))), div(transpose(grad(velocity))))*dx))
+        self.listDict['dsg-l']['list'].append(dsgml)
+        self.listDict['dgt']['list'].append(dgt)
+
+    def compute_outflow(self, velocity):
+        pass
+
+    def get_outflow_measures(self):
         pass
 
     def get_metadata_to_save(self):
@@ -423,13 +465,6 @@ class GeneralProblem(object):
         f.write(traceback.format_exc())
         f.close()
         self.remove_status_file()
-
-    def report_divergence(self, t):
-        f = open(self.metadata['name'] + "_failed_at_%5.3f.report" % t, "w")
-        f.write('STOPPED: Failed divergence test!')
-        f.close()
-        self.remove_status_file()
-        exit('STOPPED: Failed divergence test!')
 
     def write_status_file(self, t):
         self.tc.start('status')
