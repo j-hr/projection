@@ -4,14 +4,18 @@ from dolfin import *
 # names = ['cyl_c1', 'cyl']
 # names = ['cyl_c1', 'cyl_d1', 'cyl_c2', 'cyl_d2', 'cyl_c3', 'cyl_c3o', 'cyl_d3', 'cyl_e3']
 # names = ['cyl_c1', 'cyl_c2', 'cyl_c3', 'cyl_c3o', 'cyl_c3o_netgen', 'cyl15_3']
+names = ['HYK']
 names = ['cyl_c1']
 
 doPlotQualityHistogram = True
+doComputeVolume = True
 
 for meshName in names:
     mesh = Mesh("meshes/" + meshName + ".xml")
     cell_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_physical_region.xml")
     facet_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_facet_region.xml")
+
+    plot(facet_function, interactive=True)
 
     # mesh = refine(mesh)
     # plot(mesh, interactive=True)
@@ -50,4 +54,9 @@ for meshName in names:
     print('min/max outer-inner radius factor (0 worst, 1 best):', MeshQuality.radius_ratio_min_max(mesh))
     if doPlotQualityHistogram:
         exec(MeshQuality.radius_ratio_matplotlib_histogram(mesh, num_bins=100))
+
+    if doComputeVolume:
+        V = FunctionSpace(mesh, 'Lagrange', 1)
+        volume = assemble(interpolate(Expression('1.0'), V) * dx)
+        print('mesh volume:', volume)
 
