@@ -18,7 +18,7 @@ parser.add_argument('problem', help='Which problem to solve', choices=['womersle
                                                                        'FaC3D_benchmark', 'real'])
 parser.add_argument('solver', help='Which solver to use', choices=['ipcs1'])
 parser.add_argument('mesh', help='Mesh name')
-parser.add_argument('time', help='Total time', type=int)
+parser.add_argument('time', help='Total time', type=float)
 parser.add_argument('dt', help='Time step', type=float)
 parser.add_argument('-n', '--name', help='name of this run instance', default='test')
 args, remaining = parser.parse_known_args()

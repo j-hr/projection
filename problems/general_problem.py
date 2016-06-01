@@ -429,7 +429,7 @@ class GeneralProblem(object):
                 l = self.listDict[key]
                 header_row += ['last_cycle_'+l['abrev']]
                 data_row += [l['slist'][-1]] if l['slist'] else [0]
-                if 'relative_list_sec' in l:
+                if 'relative_list_sec' in l and l['relative_list_sec']:
                     header_row += ['last_cycle_'+l['abrev']+'r']
                     data_row += [l['relative_list_sec'][-1]]
                 elif key in ['p', 'p2']:

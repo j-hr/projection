@@ -4,7 +4,7 @@ from dolfin.cpp.common import info, begin, end
 from dolfin.cpp.function import FunctionAssigner
 from dolfin.cpp.la import LUSolver, KrylovSolver, as_backend_type, VectorSpaceBasis, Vector
 from dolfin.functions import TrialFunction, TestFunction, Constant, FacetNormal
-from ufl import dot, dx, grad, system, div, inner, sym, Identity, transpose, nabla_grad, sqrt, Min
+from ufl import dot, dx, grad, system, div, inner, sym, Identity, transpose, nabla_grad, sqrt, min_value
 
 import general_solver as gs
 
@@ -77,7 +77,6 @@ class Solver(gs.GeneralSolver):
         dt = self.metadata['dt']
 
         nu = Constant(self.problem.nu)
-        n = FacetNormal(self.problem.mesh)
         # TODO check proper use of watches
         self.tc.init_watch('init', 'Initialization', True)
         self.tc.init_watch('rhs', 'Assembled right hand side', True)
@@ -119,6 +118,7 @@ class Solver(gs.GeneralSolver):
             p = TrialFunction(self.Q)
             q = TestFunction(self.Q)
 
+        n = FacetNormal(mesh)
         I = Identity(u.geometric_dimension())
 
         # Initial conditions: u0 velocity at previous time step u1 velocity two time steps back p0 previous pressure
@@ -172,7 +172,7 @@ class Solver(gs.GeneralSolver):
         a1_const = (1./k)*inner(u, v)*dx + diffusion(0.5*u)
         a1_change = nonlinearity(0.5*u)
         if self.bcv == 'DDN':
-            a1_change += -0.5*Min(0., inner(u_ext, n))*inner(u, v)*problem.get_outflow_measure_form()
+            a1_change += -0.5*min_value(0., inner(u_ext, n))*inner(u, v)*problem.get_outflow_measure_form()
             # IMP assembling this leads to RuntimeError: In instant.recompile: The module did not compile with command 'make VERBOSE=1',
 
         # Stabilisation
@@ -185,7 +185,7 @@ class Solver(gs.GeneralSolver):
 
         L1 = (1./k)*inner(u0, v)*dx - nonlinearity(0.5*u0) - diffusion(0.5*u0) + pressure_rhs()
         if self.bcv == 'DDN':
-            L1 += 0.5*Min(0., inner(u_ext, n))*inner(u0, v)*problem.get_outflow_measure_form()
+            L1 += 0.5*min_value(0., inner(u_ext, n))*inner(u0, v)*problem.get_outflow_measure_form()
 
         outflow_area = Constant(problem.outflow_area)
         need_outflow = Constant(0.0)
@@ -443,7 +443,7 @@ class Solver(gs.GeneralSolver):
                 else:
                     p0.assign(p_)
 
-            t = round(t + dt, 4)  # round time step to 0.0001
+            t = round(t + dt, 6)  # round time step to 0.000001
             self.tc.end('next')
 
         info("Finished: Incremental pressure correction scheme n. 1")
