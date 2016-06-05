@@ -42,9 +42,7 @@ class Problem(gp.GeneralProblem):
         self.mesh_volume = pi*25.*20.
 
         # Import gmsh mesh
-        self.mesh = Mesh("meshes/" + args.mesh + ".xml")
-        self.cell_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_physical_region.xml")
-        self.facet_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_facet_region.xml")
+        self.mesh, self.facet_function = super(Problem, self).loadMesh(args.mesh)
         self.dsIn = Measure("ds", subdomain_id=2, subdomain_data=self.facet_function)
         self.dsOut = Measure("ds", subdomain_id=3, subdomain_data=self.facet_function)
         self.dsWall = Measure("ds", subdomain_id=1, subdomain_data=self.facet_function)
@@ -184,6 +182,12 @@ class Problem(gp.GeneralProblem):
         self.v_in.assign(self.solution)
         self.tc.end('updateBC')
 
+        # construct analytic pressure (used for computing pressure and force errors)
+        self.tc.start('analyticP')
+        analytic_pressure = womersleyBC.analytic_pressure(self.factor, self.actual_time)
+        self.sol_p = interpolate(analytic_pressure, self.pSpace)
+        self.tc.end('analyticP')
+
         self.tc.start('analyticVnorms')
         self.analytic_v_norm_L2 = norm(self.solution, norm_type='L2')
         self.analytic_v_norm_H1 = norm(self.solution, norm_type='H1')
@@ -286,8 +290,6 @@ class Problem(gp.GeneralProblem):
         self.tc.end('computePG')
         self.tc.start('analyticP')
         analytic_gradient = womersleyBC.analytic_pressure_grad(self.factor, self.actual_time)
-        analytic_pressure = womersleyBC.analytic_pressure(self.factor, self.actual_time)
-        self.sol_p = interpolate(analytic_pressure, self.pSpace)  # NT move to update_time
         if not is_tent:
             self.last_analytic_pressure_norm = norm(self.sol_p, norm_type='L2')
             self.listDict['ap_norm']['list'].append(self.last_analytic_pressure_norm)

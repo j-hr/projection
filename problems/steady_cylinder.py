@@ -40,9 +40,7 @@ class Problem(gp.GeneralProblem):
         self.mesh_volume = pi*25.*20.
 
         # Import gmsh mesh
-        self.mesh = Mesh("meshes/" + args.mesh + ".xml")
-        self.cell_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_physical_region.xml")
-        self.facet_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_facet_region.xml")
+        self.mesh, self.facet_function = super(Problem, self).loadMesh(args.mesh)
         self.dsIn = Measure("ds", subdomain_id=2, subdomain_data=self.facet_function)
         self.dsOut = Measure("ds", subdomain_id=3, subdomain_data=self.facet_function)
         self.dsWall = Measure("ds", subdomain_id=1, subdomain_data=self.facet_function)

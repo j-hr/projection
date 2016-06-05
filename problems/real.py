@@ -27,76 +27,15 @@ class Problem(gp.GeneralProblem):
 
         self.nu = 3.71 * args.nu  # kinematic viscosity
 
-        # Import gmsh mesh
+        # Import mesh
         self.compatible_meshes = ['HYK']
         if args.mesh not in self.compatible_meshes:
             exit('Bad mesh, should be some from %s' % str(self.compatible_meshes))
-
-        self.mesh = Mesh("meshes/" + args.mesh + ".xml")
-        tdim = self.mesh.topology().dim()
-        self.mesh.init(tdim-1, tdim)
-        self.cell_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_physical_region.xml")
-        # self.dsWall = Measure("ds", subdomain_id=1, subdomain_data=self.facet_function)
-        self.normal = FacetNormal(self.mesh)
+        self.mesh, self.facet_function = super(Problem, self).loadMesh(args.mesh)
         print("Mesh name: ", args.mesh, "    ", self.mesh)
-        print("Mesh norm max: ", self.mesh.hmax())
-        print("Mesh norm min: ", self.mesh.hmin())
-
-        def point_in_subdomain(p):
-            if abs(p[1]+13.6391) < 0.05:
-                return 2  # inflow
-            elif abs(-0.838444*p[0]+0.544988*p[2]+12.558) < 0.05:
-                return 3  # outflow
-            elif abs(0.0933764*p[0] - 0.933764*p[1] - 0.345493*p[2] + 10.5996) < 0.05:
-                return 4  # inflow
-            elif abs(-p[0]+20.6585) < 0.05:
-                return 5  # outflow
-
-        # Create boundary markers
-        self.facet_function = FacetFunction("size_t", self.mesh)
-        for f in facets(self.mesh):
-            if f.exterior():
-                if all(point_in_subdomain(v.point()) == 2 for v in vertices(f)):
-                    self.facet_function[f] = 2
-                elif all(point_in_subdomain(v.point()) == 3 for v in vertices(f)):
-                    self.facet_function[f] = 3
-                elif all(point_in_subdomain(v.point()) == 4 for v in vertices(f)):
-                    self.facet_function[f] = 4
-                elif all(point_in_subdomain(v.point()) == 5 for v in vertices(f)):
-                    self.facet_function[f] = 5
-                else:
-                    self.facet_function[f] = 1
-
+        # self.dsWall = Measure("ds", subdomain_id=1, subdomain_data=self.facet_function)
         self.mesh_volume = 564.938845339
-
-        # plot(self.facet_function, interactive=True)
-        # exit()
-
-        # DATA normals, centerpoints, d (absolute coefs for ax+by+cz+d=0 equation), radius for prabolic profile
-        #  f_new_input = 2
-        # n_new_input = 0 1 0
-        # TTxyz = 1.59128 -13.6391 7.24912
-        # d = 13.6391
-        # rr = 1.01077
-        #
-        #  f_new_input = 3
-        # n_new_input = -0.838444 0 0.544988
-        # TTxyz = 11.3086 -0.985461 -5.64479
-        # d = 12.558
-        # rr = 0.897705
-        #
-        #  f_new_input = 4
-        # n_new_input = 0.0933764 -0.933764 -0.345493
-        # TTxyz = -4.02584 7.70146 8.77694
-        # d = 10.5996
-        # rr = 0.553786
-        #
-        #  f_new_input = 5
-        # n_new_input = -1 0 0
-        # TTxyz = 20.6585 -1.38651 -1.24815
-        # d = 20.6585
-        # rr = 0.798752
-
+        self.normal = FacetNormal(self.mesh)
         self.dsOut1 = Measure("ds", subdomain_id=3, subdomain_data=self.facet_function)
         self.dsOut2 = Measure("ds", subdomain_id=5, subdomain_data=self.facet_function)
         self.dsIn1 = Measure("ds", subdomain_id=2, subdomain_data=self.facet_function)
@@ -121,6 +60,7 @@ class Problem(gp.GeneralProblem):
         self.v_in_4_center = [-4.02584, 7.70146, 8.77694]
         self.v_in_4_r = 0.553786
 
+    # TODO move to general using get_outflow_measures()
     def compute_outflow(self, velocity):
         out = assemble(inner(velocity, self.normal)*self.dsOut1 + inner(velocity, self.normal)*self.dsOut2)
         return out

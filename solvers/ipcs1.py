@@ -45,7 +45,8 @@ class Solver(gs.GeneralSolver):
         self.metadata['hasTentativeP'] = self.useRotationScheme
 
         self.B = args.B
-        self.preconditioner = args.precond
+        self.prec_v = args.precV
+        self.prec_p = args.precP
         self.precision_v = args.pv
         self.precision_p = args.pp
 
@@ -61,7 +62,8 @@ class Solver(gs.GeneralSolver):
         parser.add_argument('--pp', help='pressure Krylov solver precision', type=int, default=10)
         parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
                             choices=['outflow', 'nullspace', 'nullspace_s', 'lagrange'], default='outflow')
-        parser.add_argument('--precond', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu'],
+        parser.add_argument('--precV', help='Preconditioner for velocity solver', type=str, default='ilu')
+        parser.add_argument('--precP', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu'],
                             default='hypre_amg')
         parser.add_argument('-r', help='Use rotation scheme', action='store_true')
         parser.add_argument('-B', help='Use no BC in correction step', action='store_true')
@@ -74,6 +76,7 @@ class Solver(gs.GeneralSolver):
     def solve(self, problem):
         self.problem = problem
         doSave = problem.doSave
+        onlyVel = problem.saveOnlyVel
         dt = self.metadata['dt']
 
         nu = Constant(self.problem.nu)
@@ -253,10 +256,11 @@ class Solver(gs.GeneralSolver):
             if self.useRotationScheme:
                 self.solver_rot = LUSolver('umfpack')
         else:
-            self.solver_vel = KrylovSolver('gmres', 'ilu')   # nonsymetric > gmres  # IFNEED try hypre_amg
-            self.solver_p = KrylovSolver('cg', self.preconditioner)          # symmetric > CG
+            self.solver_vel = KrylovSolver('gmres', self.prec_v)   # nonsymetric > gmres  # IFNEED try hypre_amg
+            # IMP cannot use 'ilu' in parallel, 'hypre_euclid' is not supported by PETSc
+            self.solver_p = KrylovSolver('cg', self.prec_p)          # symmetric > CG
             if self.useRotationScheme:
-                self.solver_rot = KrylovSolver('cg', self.preconditioner)
+                self.solver_rot = KrylovSolver('cg', self.prec_p)
 
         solver_options = {'absolute_tolerance': 10E-10,
                           'monitor_convergence': True, 'maximum_iterations': 1000}
@@ -336,6 +340,7 @@ class Solver(gs.GeneralSolver):
                 self.tc.start('saveVel')
                 problem.save_vel(True, u_, t)
                 self.tc.end('saveVel')
+            if doSave and not onlyVel:
                 problem.save_div(True, u_)
             end()
 
@@ -376,15 +381,18 @@ class Solver(gs.GeneralSolver):
                 else:
                     foo.assign(p_+p0)
                 problem.averaging_pressure(foo)
-                problem.save_pressure(True, foo)
+                if doSave and not onlyVel:
+                    problem.save_pressure(True, foo)
             else:
                 if self.bc == 'lagrange':
                     fa.assign(pQ, p_QL.sub(0))
                     problem.averaging_pressure(pQ)
-                    problem.save_pressure(False, pQ)
+                    if doSave and not onlyVel:
+                        problem.save_pressure(False, pQ)
                 else:
                     problem.averaging_pressure(p_)
-                    problem.save_pressure(False, p_)
+                    if doSave and not onlyVel:
+                        problem.save_pressure(False, p_)
             end()
 
             begin("Computing corrected velocity")
@@ -408,6 +416,7 @@ class Solver(gs.GeneralSolver):
                 self.tc.start('saveVel')
                 problem.save_vel(False, u_cor, t)
                 self.tc.end('saveVel')
+            if doSave and not onlyVel:
                 problem.save_div(False, u_cor)
             end()
 
@@ -424,7 +433,8 @@ class Solver(gs.GeneralSolver):
                     problem.report_fail(t)
                     return 1
                 problem.averaging_pressure(p_mod)
-                problem.save_pressure(False, p_mod)
+                if doSave and not onlyVel:
+                    problem.save_pressure(False, p_mod)
                 end()
 
             # compute functionals (e. g. forces)

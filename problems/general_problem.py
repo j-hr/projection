@@ -3,7 +3,8 @@ import os, sys, traceback
 import csv, cPickle
 from dolfin import Function, assemble, interpolate, Expression, project, norm, errornorm
 from dolfin.cpp.common import mpi_comm_world, toc
-from dolfin.cpp.io import XDMFFile
+from dolfin.cpp.io import XDMFFile, HDF5File
+from dolfin.cpp.mesh import Mesh, MeshFunction
 from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl
 from math import sqrt, pi, cos
 
@@ -144,13 +145,17 @@ class GeneralProblem(object):
         self.onset_factor = 0
 
         self.doSave = False
+        self.saveOnlyVel = False
         self.doSaveDiff = False
         option = args.save
-        if option == 'doSave' or option == 'diff':
+        if option == 'doSave' or option == 'diff' or option == 'only_vel':
             self.doSave = True
             if option == 'diff':
                 self.doSaveDiff = True
                 print('Saving velocity differences.')
+            if option == 'only_vel':
+                self.saveOnlyVel = True
+                print('Saving only velocity profiles.')
             print('Saving solution ON.')
         elif option == 'noSave':
             self.doSave = False
@@ -178,13 +183,23 @@ class GeneralProblem(object):
     @staticmethod
     def setup_parser_options(parser):
         parser.add_argument('-e', '--error', help='Error control mode', choices=['doEC', 'noEC', 'test'], default='doEC')
-        parser.add_argument('-S', '--save', help='Save solution mode', choices=['doSave', 'noSave', 'diff'], default='noSave')
+        parser.add_argument('-S', '--save', help='Save solution mode', choices=['doSave', 'noSave', 'diff', 'only_vel'],
+                            default='noSave')
         #   doSave: create .xdmf files with velocity, pressure, divergence
         #   diff: save also difference vel-sol
         #   noSave: do not create .xdmf files with velocity, pressure, divergence
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=1.0)
         parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.0)
         parser.add_argument('--ldsg', help='save laplace(u) - div(2sym(grad(u))) difference', action='store_true')
+
+    @staticmethod
+    def loadMesh(mesh):
+        f = HDF5File(mpi_comm_world(), 'meshes/'+mesh+'.hdf5', 'r')
+        mesh = Mesh()
+        f.read(mesh, 'mesh', False)
+        facet_function = MeshFunction("size_t", mesh)
+        f.read(facet_function, 'facet_function')
+        return mesh, facet_function
 
     def initialize(self, V, Q, PS, D):
         self.vSpace = V
@@ -304,11 +319,10 @@ class GeneralProblem(object):
 
     def save_pressure(self, is_tent, pressure):
         self.tc.start('saveP')
-        if self.doSave:
-            self.fileDict['p2' if is_tent else 'p']['file'] << pressure
-            # pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)  # NT normalisation factor defined only in Womersley
-            # self.pgFunction.assign(pg)
-            # self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
+        self.fileDict['p2' if is_tent else 'p']['file'] << pressure
+        # pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)  # NT normalisation factor defined only in Womersley
+        # self.pgFunction.assign(pg)
+        # self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
         self.tc.end('saveP')
 
     def get_boundary_conditions(self, use_pressure_BC):
@@ -476,5 +490,8 @@ class GeneralProblem(object):
         self.tc.end('status')
 
     def remove_status_file(self):
-        os.remove(self.metadata['name'] + ".run")
+        try:
+            os.remove(self.metadata['name'] + ".run")
+        except OSError:
+            print('.run file probably not created (or already removed)')
 

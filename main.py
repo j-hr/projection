@@ -2,7 +2,7 @@ from __future__ import print_function
 
 import argparse
 import sys
-from dolfin import set_log_level, DEBUG
+from dolfin import set_log_level, DEBUG, parameters
 
 import postprocessing
 from time_control import TimeControl
