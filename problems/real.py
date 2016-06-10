@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 from dolfin import assemble, Expression, Function, DirichletBC, plot, interpolate
+from dolfin.cpp.common import info
 from dolfin.cpp.function import near
 from dolfin.cpp.mesh import Mesh, MeshFunction, FacetFunction, vertices, facets
 from math import sqrt
@@ -32,7 +33,7 @@ class Problem(gp.GeneralProblem):
         if args.mesh not in self.compatible_meshes:
             exit('Bad mesh, should be some from %s' % str(self.compatible_meshes))
         self.mesh, self.facet_function = super(Problem, self).loadMesh(args.mesh)
-        print("Mesh name: ", args.mesh, "    ", self.mesh)
+        info("Mesh name: " + args.mesh + "    " + str(self.mesh))
         # self.dsWall = Measure("ds", subdomain_id=1, subdomain_data=self.facet_function)
         self.mesh_volume = 564.938845339
         self.normal = FacetNormal(self.mesh)
@@ -83,8 +84,8 @@ class Problem(gp.GeneralProblem):
     def initialize(self, V, Q, PS, D):
         super(Problem, self).initialize(V, Q, PS, D)
 
-        print("IC type: " + self.ic)
-        print("Velocity scale factor = %4.2f" % self.factor)
+        info("IC type: " + self.ic)
+        info("Velocity scale factor = %4.2f" % self.factor)
 
         self.v_in_2 = Problem.InputVelocityProfile(self.factor, self.v_in_2_center, self.v_in_2_normal, self.v_in_2_r)
         self.v_in_4 = Problem.InputVelocityProfile(self.factor, self.v_in_4_center, self.v_in_4_normal, self.v_in_4_r)
@@ -92,7 +93,7 @@ class Problem(gp.GeneralProblem):
         # TODO move to general using get_outflow_measures method
         one = (interpolate(Expression('1.0'), Q))
         self.outflow_area = assemble(one*self.dsOut1 + one*self.dsOut2)
-        print('Outflow area:', self.outflow_area)
+        info('Outflow area: %f' % self.outflow_area)
 
     class InputVelocityProfile(Expression):
         def __init__(self, factor, center, normal, radius, **kwargs):
@@ -189,7 +190,7 @@ class Problem(gp.GeneralProblem):
         in1 = assemble(inner(self.v_in_2, self.normal)*self.dsIn1)
         in2 = assemble(inner(self.v_in_4, self.normal)*self.dsIn2)
         self.last_inflow = in1+in2
-        print('Inflow:', self.last_inflow)
+        info('Inflow: %f' % self.last_inflow)
         self.listDict['inflow']['list'].append(self.last_inflow)
 
         self.tc.end('updateBC')
@@ -208,8 +209,8 @@ class Problem(gp.GeneralProblem):
         self.listDict['outflow1']['list'].append(out1)
         self.listDict['outflow2']['list'].append(out2)
         self.listDict['outflow']['list'].append(out)
-        print('Outflow:', out)
+        info('Outflow: %f' % out)
         self.last_status_functional = out/abs(self.last_inflow)
         self.listDict['oiratio']['list'].append(self.last_status_functional)
-        print('Outflow/Inflow:', self.last_status_functional)
+        info('Outflow/Inflow: %f' % self.last_status_functional)
 

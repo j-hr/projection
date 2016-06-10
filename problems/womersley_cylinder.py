@@ -8,6 +8,7 @@ from math import pi, sqrt
 
 from problems import general_problem as gp
 import womersleyBC
+print('Imported womersley_cylinder problem.')
 
 
 class Problem(gp.GeneralProblem):

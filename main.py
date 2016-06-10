@@ -2,16 +2,13 @@ from __future__ import print_function
 
 import argparse
 import sys
-from dolfin import set_log_level, DEBUG, parameters
+from dolfin import set_log_level, INFO, DEBUG, parameters
+from dolfin.cpp.common import mpi_comm_world, MPI, info
 
 import postprocessing
 from time_control import TimeControl
 
 # Resolve input arguments===============================================================================================
-print(sys.argv)
-
-# set_log_level(DEBUG)
-
 # IFNEED move time, dt, mesh into problem class
 parser = argparse.ArgumentParser()
 parser.add_argument('problem', help='Which problem to solve', choices=['womersley_cylinder', 'steady_cylinder',
@@ -21,7 +18,21 @@ parser.add_argument('mesh', help='Mesh name')
 parser.add_argument('time', help='Total time', type=float)
 parser.add_argument('dt', help='Time step', type=float)
 parser.add_argument('-n', '--name', help='name of this run instance', default='test')
+parser.add_argument('--out', help='Which processors in parallel should print output?', choices=['all', 'main'], default='main')
 args, remaining = parser.parse_known_args()
+
+# Paralell run initialization
+comm = mpi_comm_world()
+rank = MPI.rank(comm)
+# parameters["std_out_all_processes"] = False   # print only rank==0 process output
+# parameters["ghost_mode"] = "shared_facet"     # nastaveni sdileni entit mezi procesy QQ co dela, je treba?
+
+if rank == 0 or args.out == 'all':
+    set_log_level(INFO)
+else:
+    set_log_level(INFO + 1)
+
+info('Running on %d processor(s).' % MPI.size(comm))
 
 exec('from solvers.%s import Solver' % args.solver)
 exec('from problems.%s import Problem' % args.problem)
@@ -30,8 +41,8 @@ parser = argparse.ArgumentParser()
 Solver.setup_parser_options(parser)
 Problem.setup_parser_options(parser)
 args, remaining = parser.parse_known_args(remaining, args)
-print(args)
-print('Not parsed:', remaining)
+info(str(args))
+info('Not parsed:'+str(remaining))
 
 # initialize time control
 tc = TimeControl()
@@ -50,8 +61,8 @@ metadata.update({  # QQ move into problem/solver init
     'mesh_info': str(problem.mesh),
 })
 
-print("Problem:       " + args.problem)
-print("Solver:       " + args.solver)
+info("Problem:      " + args.problem)
+info("Solver:       " + args.solver)
 # TODO move to respective files (into init() methods)
 # if args.method in ['chorinExpl', 'ipcs0', 'ipcs1']:
 #     problem.d()['hasTentativeVel'] = True
@@ -62,15 +73,15 @@ print("Solver:       " + args.solver)
 #         exit('Parameter solvers should be \'default\' when using direct method.')
 # else:
 #     if args.solvers == 'krylov':
-#         print('Chosen Krylov solvers.')
+#         info('Chosen Krylov solvers.')
 #     elif args.solvers == 'direct':
-#         print('Chosen direct solvers.')
+#         info('Chosen direct solvers.')
 
 # Set parameter values
 dt = args.dt
 ttime = args.time
-print("Time:         %1.0f s\ndt:           %d ms" % (ttime, 1000 * dt))
-
+info('Time:         %1.0f s' % ttime)
+info('dt:           %d   ms' % (1000 * dt))
 metadata.update({
     'dt': dt,
     'dt_ms': int(round(dt*1000)),
@@ -79,8 +90,9 @@ metadata.update({
 
 r = solver.solve(problem)
 out = {0: 'Solver finished correctly.', 1: 'Solver failed or solution diverged, exception caught.'}
-print(out.get(r, 'UNCAUGHT ERROR IN SOLVE METHOD'))
+info(out.get(r, 'UNCAUGHT ERROR IN SOLVE METHOD'))
 
-print('Post-processing')
-postprocessing.rewrite_xdmf_files(metadata)
-postprocessing.create_scripts(metadata)
+if rank==0:
+    info('Post-processing')
+    postprocessing.rewrite_xdmf_files(metadata)
+    postprocessing.create_scripts(metadata)

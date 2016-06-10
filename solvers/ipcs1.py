@@ -29,17 +29,17 @@ class Solver(gs.GeneralSolver):
         self.useLaplace = args.laplace
         self.bcv = 'NOT' if self.useLaplace else args.bcv
         if self.bcv == 'CDN':
-            print('Using classical do nothing condition (Tn=0).')
+            info('Using classical do nothing condition (Tn=0).')
         if self.bcv == 'DDN':
-            print('Using directional do nothing condition (Tn=0.5*negative(u.n)u).')
+            info('Using directional do nothing condition (Tn=0.5*negative(u.n)u).')
         if self.bcv == 'LAP':
-            print('Using laplace neutral condition (grad(u)n=0).')
+            info('Using laplace neutral condition (grad(u)n=0).')
         self.stabCoef = args.stab
         self.stabilize = (args.stab > DOLFIN_EPS)
         if self.stabilize:
-            print('Used streamline-diffusion stabilization with coef.:', args.stab)
+            info('Used streamline-diffusion stabilization with coef.: %f' % args.stab)
         else:
-            print('No stabilization used.')
+            info('No stabilization used.')
         self.solvers = args.solvers
         self.useRotationScheme = args.r
         self.metadata['hasTentativeP'] = self.useRotationScheme
@@ -81,20 +81,20 @@ class Solver(gs.GeneralSolver):
 
         nu = Constant(self.problem.nu)
         # TODO check proper use of watches
-        self.tc.init_watch('init', 'Initialization', True)
-        self.tc.init_watch('rhs', 'Assembled right hand side', True)
-        self.tc.init_watch('updateBC', 'Updated velocity BC', True)
-        self.tc.init_watch('applybc1', 'Applied velocity BC 1st step', True)
-        self.tc.init_watch('applybc3', 'Applied velocity BC 3rd step', True)
-        self.tc.init_watch('applybcP', 'Applied pressure BC or othogonalized rhs', True)
-        self.tc.init_watch('assembleMatrices', 'Initial matrix assembly', False)
-        self.tc.init_watch('solve 1', 'Running solver on 1st step', True)
-        self.tc.init_watch('solve 2', 'Running solver on 2nd step', True)
-        self.tc.init_watch('solve 3', 'Running solver on 3rd step', True)
-        self.tc.init_watch('solve 4', 'Running solver on 4th step', True)
-        self.tc.init_watch('assembleA1', 'Assembled A1 matrix (without stabiliz.)', True)
-        self.tc.init_watch('assembleA1stab', 'Assembled A1 stabilization', True)
-        self.tc.init_watch('next', 'Next step assignments', True)
+        self.tc.init_watch('init', 'Initialization', True, count_to_percent=True)
+        self.tc.init_watch('rhs', 'Assembled right hand side', True, count_to_percent=True)
+        self.tc.init_watch('updateBC', 'Updated velocity BC', True, count_to_percent=True)
+        self.tc.init_watch('applybc1', 'Applied velocity BC 1st step', True, count_to_percent=True)
+        self.tc.init_watch('applybc3', 'Applied velocity BC 3rd step', True, count_to_percent=True)
+        self.tc.init_watch('applybcP', 'Applied pressure BC or othogonalized rhs', True, count_to_percent=True)
+        self.tc.init_watch('assembleMatrices', 'Initial matrix assembly', False, count_to_percent=True)
+        self.tc.init_watch('solve 1', 'Running solver on 1st step', True, count_to_percent=True)
+        self.tc.init_watch('solve 2', 'Running solver on 2nd step', True, count_to_percent=True)
+        self.tc.init_watch('solve 3', 'Running solver on 3rd step', True, count_to_percent=True)
+        self.tc.init_watch('solve 4', 'Running solver on 4th step', True, count_to_percent=True)
+        self.tc.init_watch('assembleA1', 'Assembled A1 matrix (without stabiliz.)', True, count_to_percent=True)
+        self.tc.init_watch('assembleA1stab', 'Assembled A1 stabilization', True, count_to_percent=True)
+        self.tc.init_watch('next', 'Next step assignments', True, count_to_percent=True)
         self.tc.init_watch('saveVel', 'Saved velocity', True)
 
         self.tc.start('init')
@@ -175,8 +175,8 @@ class Solver(gs.GeneralSolver):
         a1_const = (1./k)*inner(u, v)*dx + diffusion(0.5*u)
         a1_change = nonlinearity(0.5*u)
         if self.bcv == 'DDN':
-            a1_change += -0.5*min_value(0., inner(u_ext, n))*inner(u, v)*problem.get_outflow_measure_form()
-            # IMP assembling this leads to RuntimeError: In instant.recompile: The module did not compile with command 'make VERBOSE=1',
+            a1_change += -0.5*min_value(Constant(0.), inner(u_ext, n))*inner(u, v)*problem.get_outflow_measure_form()
+            # IMP works only with uflacs compiler
 
         # Stabilisation
         if self.stabilize:
@@ -204,7 +204,7 @@ class Solver(gs.GeneralSolver):
                 F2 = inner(grad(pQL - p0), grad(qQL))*dx + (1./k)*qQL*div(u_)*dx + pQL*lQL*dx + qQL*rQL*dx
             else:
                 if self.forceOutflow and problem.can_force_outflow:
-                    print('Forcing outflow.')
+                    info('Forcing outflow.')
                     F2 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
                     for m in problem.get_outflow_measures():
                         F2 += (1./k)*(1./outflow_area)*need_outflow*q*m
@@ -288,7 +288,7 @@ class Solver(gs.GeneralSolver):
                     try:
                         solver.parameters[key] = value
                     except KeyError:
-                        print('Invalid option %s for KrylovSolver' % key)
+                        info('Invalid option %s for KrylovSolver' % key)
                         return 1
                 solver.parameters['preconditioner']['structure'] = 'same'
 
@@ -303,7 +303,7 @@ class Solver(gs.GeneralSolver):
         ttime = self.metadata['time']
         t = dt
         while t < (ttime + dt/2.0):
-            print("t = ", t)
+            info("t = %f" % t)
             self.problem.update_time(t)
             problem.write_status_file(t)
 
@@ -350,9 +350,9 @@ class Solver(gs.GeneralSolver):
                 begin("Computing pressure")
             if self.forceOutflow and problem.can_force_outflow:
                 out = problem.compute_outflow(u_)
-                print('Tentative outflow:', out)
+                info('Tentative outflow: %f' % out)
                 n_o = -problem.last_inflow-out
-                print('Needed outflow:', n_o)
+                info('Needed outflow: %f' % n_o)
                 need_outflow.assign(n_o)
             self.tc.start('rhs')
             b = assemble(L2)
@@ -362,7 +362,6 @@ class Solver(gs.GeneralSolver):
             if self.bc in ['nullspace', 'nullspace_s']:
                 self.null_space.orthogonalize(b)
             self.tc.end('applybcP')
-            # print(A2, b, p_.vector())
             try:
                 self.tc.start('solve 2')
                 if self.bc == 'lagrange':

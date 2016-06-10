@@ -2,7 +2,7 @@ from __future__ import print_function
 import os, sys, traceback
 import csv, cPickle
 from dolfin import Function, assemble, interpolate, Expression, project, norm, errornorm
-from dolfin.cpp.common import mpi_comm_world, toc
+from dolfin.cpp.common import mpi_comm_world, toc, MPI, info
 from dolfin.cpp.io import XDMFFile, HDF5File
 from dolfin.cpp.mesh import Mesh, MeshFunction
 from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl
@@ -11,6 +11,8 @@ from math import sqrt, pi, cos
 
 class GeneralProblem(object):
     def __init__(self, args, tc, metadata):
+        self.MPI_rank = MPI.rank(mpi_comm_world())
+
         self.metadata = metadata
 
         # need to be specified in subclass init before calling this init
@@ -152,32 +154,32 @@ class GeneralProblem(object):
             self.doSave = True
             if option == 'diff':
                 self.doSaveDiff = True
-                print('Saving velocity differences.')
+                info('Saving velocity differences.')
             if option == 'only_vel':
                 self.saveOnlyVel = True
-                print('Saving only velocity profiles.')
-            print('Saving solution ON.')
+                info('Saving only velocity profiles.')
+            info('Saving solution ON.')
         elif option == 'noSave':
             self.doSave = False
-            print('Saving solution OFF.')
+            info('Saving solution OFF.')
 
         self.doErrControl = None
         self.testErrControl = False
         if args.error == "noEC":
             self.doErrControl = False
-            print("Error control omitted")
+            info("Error control omitted")
         else:
             self.doErrControl = True
             if args.error == "test":
                 self.testErrControl = True
-                print("Error control in testing mode")
+                info("Error control in testing mode")
             else:
-                print("Error control on")
+                info("Error control on")
 
         self.str_dir_name = "%s_%s_results" % (self.problem_code, metadata['name'])
         self.metadata['dir'] = self.str_dir_name
         # create directory, needed because of using "with open(..." construction later
-        if not os.path.exists(self.str_dir_name):
+        if not os.path.exists(self.str_dir_name) and self.MPI_rank == 0:
             os.mkdir(self.str_dir_name)
 
     @staticmethod
@@ -217,10 +219,10 @@ class GeneralProblem(object):
             # self.pgFunction = Function(self.pgSpace)
             self.initialize_xdmf_files()
         self.stepsInSecond = int(round(1.0 / self.metadata['dt']))
-        print('stepsInSecond = ', self.stepsInSecond)
+        info('stepsInSecond = %d' % self.stepsInSecond)
 
     def initialize_xdmf_files(self):
-        print('  Initializing output files.')
+        info('  Initializing output files.')
         # for creating paraview scripts
         self.metadata['filename_base'] = self.problem_code + '_' + self.metadata['name']
 
@@ -267,7 +269,7 @@ class GeneralProblem(object):
             self.vFunction.assign((1.0 / self.vel_normalization_factor[0]) * (field - self.solution))
             self.fileDict['u2D' if is_tent else 'uD']['file'] << self.vFunction
         if self.args.ldsg:
-            # print(div(2.*sym(grad(field))-grad(field)).ufl_shape)
+            # info(div(2.*sym(grad(field))-grad(field)).ufl_shape)
             form = div(2.*sym(grad(field))-grad(field))
             self.pFunction.assign(project(sqrt_ufl(inner(form, form)), self.pSpace))
             self.fileDict['ldsg2' if is_tent else 'ldsg']['file'] << self.pFunction
@@ -281,13 +283,13 @@ class GeneralProblem(object):
             self.tc.start('errorV')
             errorL2_sq = assemble(inner(velocity - self.solution, velocity - self.solution) * dx)  # faster than errornorm
             errorH1seminorm_sq = assemble(inner(grad(velocity - self.solution), grad(velocity - self.solution)) * dx)  # faster than errornorm
-            print('  H1 seminorm error:', sqrt(errorH1seminorm_sq))
+            info('  H1 seminorm error: %f' % sqrt(errorH1seminorm_sq))
             errorL2 = sqrt(errorL2_sq)
             errorH1 = sqrt(errorL2_sq + errorH1seminorm_sq)
-            print("  Relative L2 error in velocity = ", errorL2 / self.analytic_v_norm_L2)
+            info("  Relative L2 error in velocity = %f" % errorL2 / self.analytic_v_norm_L2)
             self.last_error = errorH1 / self.analytic_v_norm_H1
             self.last_status_functional = self.last_error
-            print("  Relative H1 error in velocity = ", self.last_error)
+            info("  Relative H1 error in velocity = %f" % self.last_error)
             er_list_L2.append(errorL2)
             er_list_H1.append(errorH1)
             self.tc.end('errorV')
@@ -311,9 +313,9 @@ class GeneralProblem(object):
         self.tc.start('averageP')
         # averaging pressure (substract average)
         p_average = assemble((1.0/self.volume) * pressure * dx)
-        print('Average pressure: ', p_average)
+        info('Average pressure: %f' % p_average)
         p_average_function = interpolate(Expression("p", p=p_average), self.pSpace)
-        # print(p_average_function, pressure, pressure_Q)
+        # info(p_average_function, pressure, pressure_Q)
         pressure.assign(pressure - p_average_function)
         self.tc.end('averageP')
 
@@ -348,7 +350,7 @@ class GeneralProblem(object):
             self.onset_factor = 1.
         else:
             self.onset_factor = (1. - cos(pi * actual_time / self.onset))*0.5
-        print('Onset factor:', self.onset_factor)
+        info('Onset factor: %f' % self.onset_factor)
 
     def compute_functionals(self, velocity, pressure, t):
         dsgml = sqrt(assemble((1./self.mesh_volume)*inner(div(2*sym(grad(velocity))-grad(velocity)), div(2*sym(grad(velocity))-grad(velocity)))*dx))
@@ -395,7 +397,7 @@ class GeneralProblem(object):
                             temp_list = [i/l['norm'][0] for i in l['list']]
                             report_writer.writerow([md['name'], "normalized " + l['name'], abrev+"n"] + temp_list)
                         else:
-                            print('Norm missing:', l)
+                            info('Norm missing:' + str(l))
                             l['normalized_list_sec'] = []
                     if 'relative' in l:
                         norm_list = self.listDict[l['relative']]['list']
@@ -423,15 +425,15 @@ class GeneralProblem(object):
                             l['normalized_list_sec'] = temp_list
                             report_writer.writerow([md['name'], "normalized " + l['name'], abrev+"n"] + temp_list)
                         else:
-                            print('Norm missing:', l)
+                            info('Norm missing:' + str(l))
                             l['normalized_list_sec'] = []
                     if 'relative_list' in l:
                         temp_list = []
-                        # print('relative second list of', l['abrev'])
+                        # info('relative second list of'+ str(l['abrev']))
                         for sec in self.second_list:
                             N0 = (sec-1)*self.stepsInSecond
                             N1 = sec*self.stepsInSecond
-                            # print(sec,  N0, N1)
+                            # info([sec,  N0, N1])
                             temp_list.append(sqrt(sum([i*i for i in l['relative_list'][N0:N1]])/float(self.stepsInSecond)))
                         l['relative_list_sec'] = temp_list
                         report_writer.writerow([md['name'], "relative " + l['name'], abrev+"r"] + temp_list)
@@ -490,8 +492,9 @@ class GeneralProblem(object):
         self.tc.end('status')
 
     def remove_status_file(self):
-        try:
-            os.remove(self.metadata['name'] + ".run")
-        except OSError:
-            print('.run file probably not created (or already removed)')
+        if self.MPI_rank == 0:
+            try:
+                os.remove(self.metadata['name'] + ".run")
+            except OSError:
+                info('.run file probably not created')
 

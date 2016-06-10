@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 from dolfin import parameters
+from dolfin.cpp.common import info
 
 
 class GeneralSolver:

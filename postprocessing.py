@@ -10,6 +10,7 @@ regex = re.compile('"f_')
 
 def rewrite_xdmf_files(metadata):
     """changes xdmf vector name "f_something" into something like "IBC_I111velocity_diff" """
+    # NT could be done by changing name of function in FEniCS
     os.chdir(metadata['dir'])
     for f in os.listdir('.'):
         if f.endswith('xdmf'):
@@ -30,7 +31,10 @@ def rewrite_xdmf_files(metadata):
                 writer.close()
             except IOError:
                 print('IOError:', f)
-    os.remove('temp')
+    try:
+        os.remove('temp')
+    except OSError:
+        print('temp file already removed')
 
 
 def create_scripts(metadata):
