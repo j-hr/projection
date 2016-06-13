@@ -65,7 +65,7 @@ class TimeControl:
                 info('   %-40s: %12.2f s NOT USED' % (value[2], value[0]))
         info('   %-40s: %12.2f s         (%4.1f %%)' % ('Measured', sum, 100.0*sum/total_time))
         info('   %-40s: %12.2f s 100.0 %% (%4.1f %%)' % ('Base for percent values', sum_percent, 100.0*sum_percent/total_time))
-        info('   %-40s: %12.2f s %5.1f %%' % ('Unmeasured', total_time-sum, 100.0*(total_time-sum)/total_time))
+        info('   %-40s: %12.2f s         (%4.1f %%)' % ('Unmeasured', total_time-sum, 100.0*(total_time-sum)/total_time))
         # report to file
         for key in self.watches.iterkeys():   # sort keys by name
             if not sorted_by_name:

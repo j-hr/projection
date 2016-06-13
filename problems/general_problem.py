@@ -286,7 +286,7 @@ class GeneralProblem(object):
             info('  H1 seminorm error: %f' % sqrt(errorH1seminorm_sq))
             errorL2 = sqrt(errorL2_sq)
             errorH1 = sqrt(errorL2_sq + errorH1seminorm_sq)
-            info("  Relative L2 error in velocity = %f" % errorL2 / self.analytic_v_norm_L2)
+            info("  Relative L2 error in velocity = %f" % (errorL2 / self.analytic_v_norm_L2))
             self.last_error = errorH1 / self.analytic_v_norm_H1
             self.last_status_functional = self.last_error
             info("  Relative H1 error in velocity = %f" % self.last_error)
