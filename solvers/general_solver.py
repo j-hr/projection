@@ -1,11 +1,12 @@
 from __future__ import print_function
 
 from dolfin import parameters
-from dolfin.cpp.common import info
+from dolfin.cpp.common import info, MPI, mpi_comm_world
 
 
 class GeneralSolver:
     def __init__(self, args, tc, metadata):
+        self.MPI_rank = MPI.rank(mpi_comm_world())
         self.tc = tc
         self.tc.init_watch('status', 'Reported status.', True)
 

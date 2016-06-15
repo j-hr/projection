@@ -45,6 +45,7 @@ class Solver(gs.GeneralSolver):
         self.metadata['hasTentativeP'] = self.useRotationScheme
 
         self.B = args.B
+        self.use_ema = args.ema
         self.prec_v = args.precV
         self.prec_p = args.precP
         self.precision_v = args.pv
@@ -72,6 +73,9 @@ class Solver(gs.GeneralSolver):
         parser.add_argument('--stab', help='Use stabilization (positive constant)', type=float, default=0.)
         parser.add_argument('--bcv', help='Oufflow BC for velocity (with stress formulation)',
                             choices=['CDN', 'DDN', 'LAP'], default='CDN')
+        parser.add_argument('--ema', help='Use EMA conserving scheme for convection term', action='store_true')
+        # described in Charnyi, Heister, Olshanskii, Rebholz:
+        # "On conservation laws of Navier-Stokes Galerkin discretizations" (2016)
 
     def solve(self, problem):
         self.problem = problem
@@ -151,7 +155,12 @@ class Solver(gs.GeneralSolver):
         u_ext = 1.5*u0 - 0.5*u1  # extrapolation for convection term
 
         def nonlinearity(function):
-            return inner(dot(grad(function), u_ext), v) * dx
+            if self.use_ema:
+               return 2*inner(dot(sym(grad(function)), u_ext), v) * dx + inner(div(function)*u_ext, v) * dx
+                # return 2*inner(dot(sym(grad(function)), u_ext), v) * dx + inner(div(u_ext)*function, v) * dx
+                # QQ implement this way?
+            else:
+                return inner(dot(grad(function), u_ext), v) * dx
 
         def diffusion(fce):
             if self.useLaplace:
@@ -305,7 +314,8 @@ class Solver(gs.GeneralSolver):
         while t < (ttime + dt/2.0):
             info("t = %f" % t)
             self.problem.update_time(t)
-            problem.write_status_file(t)
+            if self.MPI_rank == 0:
+                problem.write_status_file(t)
 
             # assemble matrix (it depends on solution)
             self.tc.start('assembleA1')
