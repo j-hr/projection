@@ -1,5 +1,5 @@
 from __future__ import print_function
-from dolfin import Function, VectorFunctionSpace, FunctionSpace, assemble, Expression, CellSize, DOLFIN_EPS
+from dolfin import Function, VectorFunctionSpace, FunctionSpace, assemble, Expression, CellSize, DOLFIN_EPS, parameters
 from dolfin.cpp.common import info, begin, end
 from dolfin.cpp.function import FunctionAssigner
 from dolfin.cpp.la import LUSolver, KrylovSolver, as_backend_type, VectorSpaceBasis, Vector
@@ -27,6 +27,7 @@ class Solver(gs.GeneralSolver):
         self.bc = args.bc
         self.forceOutflow = args.fo
         self.useLaplace = args.laplace
+        self.use_full_SUPG = args.cs
         self.bcv = 'NOT' if self.useLaplace else args.bcv
         if self.bcv == 'CDN':
             info('Using classical do nothing condition (Tn=0).')
@@ -37,7 +38,10 @@ class Solver(gs.GeneralSolver):
         self.stabCoef = args.stab
         self.stabilize = (args.stab > DOLFIN_EPS)
         if self.stabilize:
-            info('Used streamline-diffusion stabilization with coef.: %f' % args.stab)
+            if self.use_full_SUPG:
+                info('Used consistent streamline-diffusion stabilization with coef.: %f' % args.stab)
+            else:
+                info('Used non-consistent streamline-diffusion stabilization with coef.: %f' % args.stab)
         else:
             info('No stabilization used.')
         self.solvers = args.solvers
@@ -76,6 +80,7 @@ class Solver(gs.GeneralSolver):
         parser.add_argument('--ema', help='Use EMA conserving scheme for convection term', action='store_true')
         # described in Charnyi, Heister, Olshanskii, Rebholz:
         # "On conservation laws of Navier-Stokes Galerkin discretizations" (2016)
+        parser.add_argument('--cs', help='Use consistent SUPG stabilisation.', action='store_true')
 
     def solve(self, problem):
         self.problem = problem
@@ -154,50 +159,60 @@ class Solver(gs.GeneralSolver):
         # step 1: Tentative velocity, solve to u_
         u_ext = 1.5*u0 - 0.5*u1  # extrapolation for convection term
 
+        # Stabilisation
+        h = CellSize(mesh)
+        delta = Constant(self.stabCoef)*h/(sqrt(inner(u_ext, u_ext))+h)
+        # Cod delta:
+        delta_full = Constant(self.stabCoef)*h**2/(2*nu*k + k*h*inner(u_ext, u_ext)+h**2)
+        if self.use_full_SUPG:
+            v1 = v + delta_full*0.5*k*dot(grad(v), u_ext)
+            parameters['form_compiler']['quadrature_degree'] = 6
+        else:
+            v1 = v
+
+
         def nonlinearity(function):
             if self.use_ema:
-               return 2*inner(dot(sym(grad(function)), u_ext), v) * dx + inner(div(function)*u_ext, v) * dx
+               return 2*inner(dot(sym(grad(function)), u_ext), v1) * dx + inner(div(function)*u_ext, v1) * dx
                 # return 2*inner(dot(sym(grad(function)), u_ext), v) * dx + inner(div(u_ext)*function, v) * dx
                 # QQ implement this way?
             else:
-                return inner(dot(grad(function), u_ext), v) * dx
+                return inner(dot(grad(function), u_ext), v1) * dx
 
         def diffusion(fce):
             if self.useLaplace:
-                return nu*inner(grad(fce), grad(v)) * dx
+                return nu*inner(grad(fce), grad(v1)) * dx
             else:
-                form = inner(nu * 2 * sym(grad(fce)), sym(grad(v))) * dx
+                form = inner(nu * 2 * sym(grad(fce)), sym(grad(v1))) * dx
                 if self.bcv == 'CDN':
                     return form
                 if self.bcv == 'LAP':
-                    return form - inner(nu*dot(grad(fce).T, n), v) * problem.get_outflow_measure_form()
+                    return form - inner(nu*dot(grad(fce).T, n), v1) * problem.get_outflow_measure_form()
                 if self.bcv == 'DDN':
                     return form  # additional term must be added to non-constant part
 
         def pressure_rhs():
             if self.useLaplace or self.bcv == 'LAP':
-                return inner(p0, div(v)) * dx - inner(p0*n, v) * problem.get_outflow_measure_form()
+                return inner(p0, div(v1)) * dx - inner(p0*n, v1) * problem.get_outflow_measure_form()
                 # NT term inner(inner(p, n), v) is 0 when p=0 on outflow
             else:
-                return inner(p0, div(v)) * dx
+                return inner(p0, div(v1)) * dx
 
-        a1_const = (1./k)*inner(u, v)*dx + diffusion(0.5*u)
+        a1_const = (1./k)*inner(u, v1)*dx + diffusion(0.5*u)
         a1_change = nonlinearity(0.5*u)
         if self.bcv == 'DDN':
-            a1_change += -0.5*min_value(Constant(0.), inner(u_ext, n))*inner(u, v)*problem.get_outflow_measure_form()
+            a1_change += -0.5*min_value(Constant(0.), inner(u_ext, n))*inner(u, v1)*problem.get_outflow_measure_form()
             # IMP works only with uflacs compiler
 
-        # Stabilisation
-        if self.stabilize:
-            h = CellSize(mesh)
-            delta = Constant(self.stabCoef)*h/(sqrt(inner(u_ext, u_ext))+h)
+        # Non-consistent SUPG stabilisation
+        if self.stabilize and not self.use_full_SUPG:
             # a1_stab = delta*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx    # IMP too expensive!
             a1_stab = delta*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx(None, {'quadrature_degree': 6})
             # QQ what is optimal quadrature degree?
 
-        L1 = (1./k)*inner(u0, v)*dx - nonlinearity(0.5*u0) - diffusion(0.5*u0) + pressure_rhs()
+        L1 = (1./k)*inner(u0, v1)*dx - nonlinearity(0.5*u0) - diffusion(0.5*u0) + pressure_rhs()
         if self.bcv == 'DDN':
-            L1 += 0.5*min_value(0., inner(u_ext, n))*inner(u0, v)*problem.get_outflow_measure_form()
+            L1 += 0.5*min_value(0., inner(u_ext, n))*inner(u0, v1)*problem.get_outflow_measure_form()
 
         outflow_area = Constant(problem.outflow_area)
         need_outflow = Constant(0.0)
@@ -251,7 +266,7 @@ class Solver(gs.GeneralSolver):
         self.tc.start('assembleMatrices')
         A1_const = assemble(a1_const)  # need to be here, so A1 stays one Python object during repeated assembly
         A1_change = A1_const.copy()  # copy to get matrix with same sparse structure (data will be overwriten)
-        if self.stabilize:
+        if self.stabilize and not self.use_full_SUPG:
             A1_stab = A1_const.copy()  # copy to get matrix with same sparse structure (data will be overwriten)
         A2 = assemble(a2)
         A3 = assemble(a3)
@@ -324,7 +339,7 @@ class Solver(gs.GeneralSolver):
             A1.axpy(1, A1_change, True)
             self.tc.end('assembleA1')
             self.tc.start('assembleA1stab')
-            if self.stabilize:
+            if self.stabilize and not self.use_full_SUPG:
                 assemble(a1_stab, tensor=A1_stab)  # assembling into existing matrix is faster than assembling new one
                 A1.axpy(1, A1_stab, True)
             self.tc.end('assembleA1stab')
@@ -341,17 +356,17 @@ class Solver(gs.GeneralSolver):
                 self.tc.start('solve 1')
                 self.solver_vel.solve(A1, u_.vector(), b)
                 self.tc.end('solve 1')
+                if doSave:
+                    self.tc.start('saveVel')
+                    problem.save_vel(True, u_, t)
+                    self.tc.end('saveVel')
+                if doSave and not onlyVel:
+                    problem.save_div(True, u_)
                 problem.compute_err(True, u_, t)
                 problem.compute_div(True, u_)
             except RuntimeError as inst:
                 problem.report_fail(t)
                 return 1
-            if doSave:
-                self.tc.start('saveVel')
-                problem.save_vel(True, u_, t)
-                self.tc.end('saveVel')
-            if doSave and not onlyVel:
-                problem.save_div(True, u_)
             end()
 
             if self.useRotationScheme:
