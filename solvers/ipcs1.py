@@ -2,7 +2,8 @@ from __future__ import print_function
 from dolfin import Function, VectorFunctionSpace, FunctionSpace, assemble, Expression, CellSize, DOLFIN_EPS, parameters
 from dolfin.cpp.common import info, begin, end
 from dolfin.cpp.function import FunctionAssigner
-from dolfin.cpp.la import LUSolver, KrylovSolver, as_backend_type, VectorSpaceBasis, Vector
+from dolfin.cpp.la import LUSolver, KrylovSolver, as_backend_type, VectorSpaceBasis, Vector, PETScKrylovSolver, \
+    PETScOptions
 from dolfin.functions import TrialFunction, TestFunction, Constant, FacetNormal
 from ufl import dot, dx, grad, system, div, inner, sym, Identity, transpose, nabla_grad, sqrt, min_value
 
@@ -18,7 +19,8 @@ class Solver(gs.GeneralSolver):
         gs.GeneralSolver.__init__(self, args, tc, metadata)
         self.metadata['hasTentativeV'] = True
 
-        self.solver_vel = None
+        self.solver_vel_tent = None
+        self.solver_vel_cor = None
         self.solver_p = None
         self.solver_rot = None
         self.null_space = None
@@ -50,9 +52,11 @@ class Solver(gs.GeneralSolver):
 
         self.B = args.B
         self.use_ema = args.ema
+        self.cbcDelta = args.cbcDelta
         self.prec_v = args.precV
         self.prec_p = args.precP
-        self.precision_v = args.pv
+        self.precision_rel_v_tent = args.prv1
+        self.precision_abs_v_tent = args.pav1
         self.precision_p = args.pp
 
     def __str__(self):
@@ -63,11 +67,12 @@ class Solver(gs.GeneralSolver):
     def setup_parser_options(parser):
         gs.GeneralSolver.setup_parser_options(parser)
         parser.add_argument('-s', '--solvers', help='Solvers', choices=['direct', 'krylov'], default='krylov')
-        parser.add_argument('--pv', help='velocity Krylov solver precision', type=int, default=6)
+        parser.add_argument('--prv1', help='relative tentative velocity Krylov solver precision', type=int, default=6)
+        parser.add_argument('--pav1', help='absolute tentative velocity Krylov solver precision', type=int, default=10)
         parser.add_argument('--pp', help='pressure Krylov solver precision', type=int, default=10)
         parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
                             choices=['outflow', 'nullspace', 'nullspace_s', 'lagrange'], default='outflow')
-        parser.add_argument('--precV', help='Preconditioner for velocity solver', type=str, default='ilu')
+        parser.add_argument('--precV', help='Preconditioner for tentative velocity solver', type=str, default='ilu')
         parser.add_argument('--precP', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu'],
                             default='hypre_amg')
         parser.add_argument('-r', help='Use rotation scheme', action='store_true')
@@ -81,6 +86,7 @@ class Solver(gs.GeneralSolver):
         # described in Charnyi, Heister, Olshanskii, Rebholz:
         # "On conservation laws of Navier-Stokes Galerkin discretizations" (2016)
         parser.add_argument('--cs', help='Use consistent SUPG stabilisation.', action='store_true')
+        parser.add_argument('--cbcDelta', help='Use simpler cbcflow parameter for SUPG', action='store_true')
 
     def solve(self, problem):
         self.problem = problem
@@ -90,7 +96,7 @@ class Solver(gs.GeneralSolver):
 
         nu = Constant(self.problem.nu)
         # TODO check proper use of watches
-        self.tc.init_watch('init', 'Initialization', True, count_to_percent=True)
+        self.tc.init_watch('init', 'Initialization', True, count_to_percent=False)
         self.tc.init_watch('rhs', 'Assembled right hand side', True, count_to_percent=True)
         self.tc.init_watch('updateBC', 'Updated velocity BC', True, count_to_percent=True)
         self.tc.init_watch('applybc1', 'Applied velocity BC 1st step', True, count_to_percent=True)
@@ -161,15 +167,17 @@ class Solver(gs.GeneralSolver):
 
         # Stabilisation
         h = CellSize(mesh)
-        delta = Constant(self.stabCoef)*h/(sqrt(inner(u_ext, u_ext))+h)
-        # Cod delta:
-        delta_full = Constant(self.stabCoef)*h**2/(2*nu*k + k*h*inner(u_ext, u_ext)+h**2)
+        # CBC delta:
+        if self.cbcDelta:
+            delta = Constant(self.stabCoef)*h/(sqrt(inner(u_ext, u_ext))+h)
+        else:
+            delta = Constant(self.stabCoef)*h**2/(2*nu*k + k*h*inner(u_ext, u_ext)+h**2)
+
         if self.use_full_SUPG:
-            v1 = v + delta_full*0.5*k*dot(grad(v), u_ext)
+            v1 = v + delta*0.5*k*dot(grad(v), u_ext)
             parameters['form_compiler']['quadrature_degree'] = 6
         else:
             v1 = v
-
 
         def nonlinearity(function):
             if self.use_ema:
@@ -204,15 +212,16 @@ class Solver(gs.GeneralSolver):
             a1_change += -0.5*min_value(Constant(0.), inner(u_ext, n))*inner(u, v1)*problem.get_outflow_measure_form()
             # IMP works only with uflacs compiler
 
-        # Non-consistent SUPG stabilisation
-        if self.stabilize and not self.use_full_SUPG:
-            # a1_stab = delta*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx    # IMP too expensive!
-            a1_stab = delta*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx(None, {'quadrature_degree': 6})
-            # QQ what is optimal quadrature degree?
-
         L1 = (1./k)*inner(u0, v1)*dx - nonlinearity(0.5*u0) - diffusion(0.5*u0) + pressure_rhs()
         if self.bcv == 'DDN':
             L1 += 0.5*min_value(0., inner(u_ext, n))*inner(u0, v1)*problem.get_outflow_measure_form()
+
+        # Non-consistent SUPG stabilisation
+        if self.stabilize and not self.use_full_SUPG:
+            # a1_stab = delta*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx
+            a1_stab = 0.5*delta*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx(None, {'quadrature_degree': 6})
+            # NT optional: use Crank Nicolson in stabilisation term: change RHS
+            # L1 += -0.5*delta*inner(dot(grad(u0), u_ext), dot(grad(v), u_ext))*dx(None, {'quadrature_degree': 6})
 
         outflow_area = Constant(problem.outflow_area)
         need_outflow = Constant(0.0)
@@ -275,19 +284,27 @@ class Solver(gs.GeneralSolver):
         self.tc.end('assembleMatrices')
 
         if self.solvers == 'direct':
-            self.solver_vel = LUSolver('mumps')
+            self.solver_vel_tent = LUSolver('mumps')
+            self.solver_vel_cor = LUSolver('mumps')
             self.solver_p = LUSolver('umfpack')
             if self.useRotationScheme:
                 self.solver_rot = LUSolver('umfpack')
         else:
-            self.solver_vel = KrylovSolver('gmres', self.prec_v)   # nonsymetric > gmres  # IFNEED try hypre_amg
-            # IMP cannot use 'ilu' in parallel, 'hypre_euclid' is not supported by PETSc
+            # NT not needed, chosen not to use hypre_parasails
+            # if self.prec_v == 'hypre_parasails':  # in FEniCS 1.6.0 inaccessible using KrylovSolver class
+            #     self.solver_vel_tent = PETScKrylovSolver('gmres')   # PETSc4py object
+            #     self.solver_vel_tent.ksp().getPC().setType('hypre')
+            #     PETScOptions.set('pc_hypre_type', 'parasails')
+            #     # this is global setting, but preconditioners for pressure solvers are set by their constructors
+            # else:
+            self.solver_vel_tent = KrylovSolver('gmres', self.prec_v)   # nonsymetric > gmres
+            # IMP cannot use 'ilu' in parallel (choose different default option)
+            self.solver_vel_cor = KrylovSolver('cg', 'hypre_amg')   # nonsymetric > gmres
             self.solver_p = KrylovSolver('cg', self.prec_p)          # symmetric > CG
             if self.useRotationScheme:
                 self.solver_rot = KrylovSolver('cg', self.prec_p)
 
-        solver_options = {'absolute_tolerance': 10E-10,
-                          'monitor_convergence': True, 'maximum_iterations': 1000}
+        solver_options = {'monitor_convergence': True, 'maximum_iterations': 1000}
 
         # Get the nullspace if there are no pressure boundary conditions
         foo = Function(self.Q)     # auxiliary vector for setting pressure nullspace
@@ -300,14 +317,19 @@ class Solver(gs.GeneralSolver):
                 as_backend_type(A2).set_nullspace(self.null_space)
 
         # apply global options for Krylov solvers
-        self.solver_vel.parameters['relative_tolerance'] = 10**(-self.precision_v)
+        self.solver_vel_tent.parameters['relative_tolerance'] = 10 ** (-self.precision_rel_v_tent)
+        self.solver_vel_tent.parameters['absolute_tolerance'] = 10 ** (-self.precision_abs_v_tent)
+        self.solver_vel_cor.parameters['relative_tolerance'] = 10E-6
+        self.solver_vel_cor.parameters['absolute_tolerance'] = 10E-10
         self.solver_p.parameters['relative_tolerance'] = 10**(-self.precision_p)
+        self.solver_p.parameters['absolute_tolerance'] = 10E-10
         if self.useRotationScheme:
             self.solver_rot.parameters['relative_tolerance'] = 10**(-self.precision_p)
+            self.solver_rot.parameters['absolute_tolerance'] = 10E-10
 
         if self.solvers == 'krylov':
-            for solver in [self.solver_vel, self.solver_p, self.solver_rot] if self.useRotationScheme else \
-                    [self.solver_vel, self.solver_p]:
+            for solver in [self.solver_vel_tent, self.solver_vel_cor, self.solver_p, self.solver_rot] if \
+                    self.useRotationScheme else [self.solver_vel_tent, self.solver_vel_cor, self.solver_p]:
                 for key, value in solver_options.items():
                     try:
                         solver.parameters[key] = value
@@ -354,7 +376,7 @@ class Solver(gs.GeneralSolver):
             self.tc.end('applybc1')
             try:
                 self.tc.start('solve 1')
-                self.solver_vel.solve(A1, u_.vector(), b)
+                self.solver_vel_tent.solve(A1, u_.vector(), b)
                 self.tc.end('solve 1')
                 if doSave:
                     self.tc.start('saveVel')
@@ -429,7 +451,7 @@ class Solver(gs.GeneralSolver):
                 self.tc.end('applybc3')
             try:
                 self.tc.start('solve 3')
-                self.solver_vel.solve(A3, u_cor.vector(), b)
+                self.solver_vel_cor.solve(A3, u_cor.vector(), b)
                 self.tc.end('solve 3')
                 problem.compute_err(False, u_cor, t)
                 problem.compute_div(False, u_cor)

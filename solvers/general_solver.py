@@ -26,7 +26,7 @@ class GeneralSolver:
 
     @staticmethod
     def setup_parser_options(parser):
-        parser.add_argument('--ffc', help='Form compiler options', choices=['auto_opt', 'uflacs', 'uflacs_opt', 'auto'], default='auto_opt')
+        parser.add_argument('--ffc', help='Form compiler options', choices=['auto_opt', 'uflacs', 'uflacs_opt', 'auto'], default='uflacs_opt')
 
     def initialize(self, options):
         pass
