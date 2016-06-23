@@ -4,9 +4,14 @@ import argparse
 import sys
 from dolfin import set_log_level, INFO, DEBUG, parameters
 from dolfin.cpp.common import mpi_comm_world, MPI, info
+from dolfin.cpp.la import PETScOptions
 
 import postprocessing
 from time_control import TimeControl
+
+# additional output
+PETScOptions.set('ksp_view')  # shows info about used PETSc Solver and preconditioner
+PETScOptions.set('log_summary')  # QQ useful?
 
 # Resolve input arguments===============================================================================================
 # IFNEED move time, dt, mesh into problem class
