@@ -1,5 +1,6 @@
 from __future__ import print_function
-from dolfin import Function, VectorFunctionSpace, FunctionSpace, assemble, Expression, CellSize, DOLFIN_EPS, parameters
+from dolfin import Function, VectorFunctionSpace, FunctionSpace, assemble, Expression, CellSize, DOLFIN_EPS, parameters, \
+    plot
 from dolfin.cpp.common import info, begin, end
 from dolfin.cpp.function import FunctionAssigner
 from dolfin.cpp.la import LUSolver, KrylovSolver, as_backend_type, VectorSpaceBasis, Vector, PETScKrylovSolver, \
@@ -193,10 +194,14 @@ class Solver(gs.GeneralSolver):
             else:
                 form = inner(nu * 2 * sym(grad(fce)), sym(grad(v1))) * dx
                 if self.bcv == 'CDN':
+                    # IMP will work only if p=0 on output, or we must add term
+                    # inner(p0*n, v)*problem.get_outflow_measure_form() to avoid boundary layer
                     return form
                 if self.bcv == 'LAP':
-                    return form - inner(nu*dot(grad(fce).T, n), v1) * problem.get_outflow_measure_form()
+                    return form - inner(nu*dot(grad(fce).T, n), v1)  * problem.get_outflow_measure_form()
                 if self.bcv == 'DDN':
+                    # IMP will work only if p=0 on output, or we must add term
+                    # inner(p0*n, v)*problem.get_outflow_measure_form() to avoid boundary layer
                     return form  # additional term must be added to non-constant part
 
         def pressure_rhs():
@@ -209,6 +214,9 @@ class Solver(gs.GeneralSolver):
         a1_const = (1./k)*inner(u, v1)*dx + diffusion(0.5*u)
         a1_change = nonlinearity(0.5*u)
         if self.bcv == 'DDN':
+            # IMP Problem: Does not penalize influx for current step, only for the next one
+            # IMP this can lead to oscilation: DDN correct next step, but then u_ext is OK so in next step DDN is not used, leading to new influx...
+            # u and u_ext cannot be switched, min_value is nonlinear function
             a1_change += -0.5*min_value(Constant(0.), inner(u_ext, n))*inner(u, v1)*problem.get_outflow_measure_form()
             # IMP works only with uflacs compiler
 
@@ -304,7 +312,9 @@ class Solver(gs.GeneralSolver):
             if self.useRotationScheme:
                 self.solver_rot = KrylovSolver('cg', self.prec_p)
 
-        solver_options = {'monitor_convergence': True, 'maximum_iterations': 1000}
+        solver_options = {'monitor_convergence': True, 'maximum_iterations': 1000, 'nonzero_initial_guess': True}
+        # 'nonzero_initial_guess': True   with  solver.solbe(A, u, b) means that
+        # Solver will use anything stored in u as an initial guess
 
         # Get the nullspace if there are no pressure boundary conditions
         foo = Function(self.Q)     # auxiliary vector for setting pressure nullspace
@@ -337,6 +347,10 @@ class Solver(gs.GeneralSolver):
                         info('Invalid option %s for KrylovSolver' % key)
                         return 1
                 solver.parameters['preconditioner']['structure'] = 'same'
+                # matrices A2-A4 do not change, so we can reuse preconditioners
+
+        self.solver_vel_tent.parameters['preconditioner']['structure'] = 'same_nonzero_pattern'
+        # matrix A1 changes every time step, so change of preconditioner must be allowed
 
         if self.bc == 'lagrange':
             fa = FunctionAssigner(self.Q, QL.sub(0))
@@ -353,6 +367,12 @@ class Solver(gs.GeneralSolver):
             self.problem.update_time(t)
             if self.MPI_rank == 0:
                 problem.write_status_file(t)
+
+            # DDN debug
+            # u_ext_in = assemble(inner(u_ext, n)*problem.get_outflow_measure_form())
+            # DDN_triggered = assemble(min_value(Constant(0.), inner(u_ext, n))*problem.get_outflow_measure_form())
+            # print('DDN: u_ext*n dSout = ', u_ext_in)
+            # print('DDN: negative part of u_ext*n dSout = ', DDN_triggered)
 
             # assemble matrix (it depends on solution)
             self.tc.start('assembleA1')
@@ -390,6 +410,12 @@ class Solver(gs.GeneralSolver):
                 problem.report_fail(t)
                 return 1
             end()
+
+            # DDN debug
+            # u_ext_in = assemble(inner(u_, n)*problem.get_outflow_measure_form())
+            # DDN_triggered = assemble(min_value(Constant(0.), inner(u_, n))*problem.get_outflow_measure_form())
+            # print('DDN: u_tent*n dSout = ', u_ext_in)
+            # print('DDN: negative part of u_tent*n dSout = ', DDN_triggered)
 
             if self.useRotationScheme:
                 begin("Computing tentative pressure")
@@ -436,9 +462,12 @@ class Solver(gs.GeneralSolver):
                     if doSave and not onlyVel:
                         problem.save_pressure(False, pQ)
                 else:
-                    problem.averaging_pressure(p_)
+                    # we do not want to change p=0 on outflow, it conflicts with do-nothing conditions
+                    foo = Function(self.Q)
+                    foo.assign(p_)
+                    problem.averaging_pressure(foo)
                     if doSave and not onlyVel:
-                        problem.save_pressure(False, p_)
+                        problem.save_pressure(False, foo)
             end()
 
             begin("Computing corrected velocity")
@@ -466,6 +495,12 @@ class Solver(gs.GeneralSolver):
                 problem.save_div(False, u_cor)
             end()
 
+            # DDN debug
+            # u_ext_in = assemble(inner(u_cor, n)*problem.get_outflow_measure_form())
+            # DDN_triggered = assemble(min_value(Constant(0.), inner(u_cor, n))*problem.get_outflow_measure_form())
+            # print('DDN: u_cor*n dSout = ', u_ext_in)
+            # print('DDN: negative part of u_cor*n dSout = ', DDN_triggered)
+
             if self.useRotationScheme:
                 begin("Rotation scheme pressure correction")
                 self.tc.start('rhs')
@@ -491,6 +526,8 @@ class Solver(gs.GeneralSolver):
             self.tc.start('next')
             u1.assign(u0)
             u0.assign(u_cor)
+            u_.assign(u_cor)  # use corretced velocity as initial guess in first step
+
             if self.useRotationScheme:
                 p0.assign(p_mod)
             else:
