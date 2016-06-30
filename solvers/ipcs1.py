@@ -357,7 +357,7 @@ class Solver(gs.GeneralSolver):
             fa = FunctionAssigner(self.Q, QL.sub(0))
 
         # boundary conditions
-        bcu, bcp = problem.get_boundary_conditions(self.bc == 'outflow')
+        bcu, bcp = problem.get_boundary_conditions(self.bc == 'outflow', self.V, self.Q)
         self.tc.end('init')
         # Time-stepping
         info("Running of Incremental pressure correction scheme n. 1")

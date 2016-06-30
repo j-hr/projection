@@ -21,26 +21,8 @@ viewLayout1 = GetLayout()
 # place view in the layout
 viewLayout1.AssignView(0, rv1)
 
-# split cell
-viewLayout1.SplitHorizontal(0, 0.5)
-
-# set active view
-SetActiveView(None)
-
-# Create a new 'Render View'
-rv2 = CreateView('RenderView')
-rv2.ViewSize = [546, 656]
-rv2.AxesGrid = 'GridAxes3DActor'
-rv2.StereoType = 0
-rv2.Background = [1.0, 1.0, 1.0]
-rv2.OrientationAxesLabelColor = [0.0, 0.0, 0.0]
-
-# place view in the layout
-viewLayout1.AssignView(2, rv2)
-
 load = [
     ('$FILENAME1$','$VECTORNAME1$',rv1),
-    ('$FILENAME2$','$VECTORNAME2$',rv2),
 ]
 
 for (path, vector_name, rv) in load:
@@ -104,8 +86,4 @@ for (path, vector_name, rv) in load:
     glyph_legend.LabelColor = [0.0, 0.0, 0.0]
     glyph_legend.Title = vector_name
 
-
-
     animationScene1.GoToFirst()
-
-AddCameraLink(rv1,rv2,'link1')

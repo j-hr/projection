@@ -113,7 +113,7 @@ class Problem(gp.GeneralProblem):
         print('Normalisation factors (vel, p, pg):', self.vel_normalization_factor[0], self.p_normalization_factor[0],
               self.pg_normalization_factor[0])
 
-    def get_boundary_conditions(self, use_pressure_BC):
+    def get_boundary_conditions(self, use_pressure_BC, v_space, p_space):
         # boundary parts: 1 walls, 2 inflow, 3 outflow
         if self.ic == 'zero':
             self.v_in = Expression(("0.0", "0.0", "(t<0.5)?((sin(pi*t))*factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))):"
@@ -124,12 +124,12 @@ class Problem(gp.GeneralProblem):
                                    factor=self.factor)
 
         # Boundary conditions
-        bc0 = DirichletBC(self.vSpace, (0.0, 0.0, 0.0), self.facet_function, 1)
-        inflow = DirichletBC(self.vSpace, self.v_in, self.facet_function, 2)
+        bc0 = DirichletBC(v_space, (0.0, 0.0, 0.0), self.facet_function, 1)
+        inflow = DirichletBC(v_space, self.v_in, self.facet_function, 2)
         bcu = [inflow, bc0]
         bcp = []
         if use_pressure_BC:
-            outflow = DirichletBC(self.pSpace, 0.0, self.facet_function, 3)
+            outflow = DirichletBC(p_space, 0.0, self.facet_function, 3)
             bcp = [outflow]
         return bcu, bcp
 

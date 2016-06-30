@@ -53,7 +53,6 @@ class GeneralProblem(object):
         self.pFunction = None
         self.solutionSpace = None
         self.solution = None
-        self.partialSolutionSpace = None  # scalar space of same element type as velocity
 
         self.actual_time = 0.0
         self.step_number = 0
@@ -213,7 +212,6 @@ class GeneralProblem(object):
         self.divSpace = D
         self.pSpace = Q
         self.solutionSpace = V
-        self.partialSolutionSpace = PS
         self.vFunction = Function(V)
         self.divFunction = Function(D)
         self.pFunction = Function(Q)
@@ -332,7 +330,7 @@ class GeneralProblem(object):
         # self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
         self.tc.end('saveP')
 
-    def get_boundary_conditions(self, use_pressure_BC):
+    def get_boundary_conditions(self, use_pressure_BC, v_space, p_space):
         pass
 
     def get_initial_conditions(self, function_list):

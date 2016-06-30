@@ -39,18 +39,32 @@ def rewrite_xdmf_files(metadata):
 
 def create_scripts(metadata):
     abspath = os.path.abspath(os.curdir)
-    template = open('../paraview_scripts/template_compare_vel_tent_cor.py', 'r')
-    out_file = open('compareveldiff.py', 'w')
-    for line in template:
-        fac = 1.0
-        if 'factor' in metadata:
-            fac = 0.001/metadata['factor']
-        line = line.replace('$FACTOR$', str(fac))
-        line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'velocity_tent.xdmf')
-        line = line.replace('$FILENAME2$', metadata['dir']+'/'+metadata['filename_base']+'velocity.xdmf')
-        line = line.replace('$VECTORNAME1$', metadata['name']+'velocity_tent')
-        line = line.replace('$VECTORNAME2$', metadata['name']+'velocity')
-        out_file.write(line)
-    template.close()
-    out_file.close()
+    if metadata['hasTentativeV']:
+        template = open('../paraview_scripts/template_compare_vel_tent_cor.py', 'r')
+        out_file = open('compare_vel_tent.py', 'w')
+        for line in template:
+            fac = 1.0
+            if 'factor' in metadata:
+                fac = 0.001/metadata['factor']
+            line = line.replace('$FACTOR$', str(fac))
+            line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'velocity_tent.xdmf')
+            line = line.replace('$FILENAME2$', metadata['dir']+'/'+metadata['filename_base']+'velocity.xdmf')
+            line = line.replace('$VECTORNAME1$', metadata['name']+'velocity_tent')
+            line = line.replace('$VECTORNAME2$', metadata['name']+'velocity')
+            out_file.write(line)
+        template.close()
+        out_file.close()
+    else:
+        template = open('../paraview_scripts/template_velocity.py', 'r')
+        out_file = open('show_vel.py', 'w')
+        for line in template:
+            fac = 1.0
+            if 'factor' in metadata:
+                fac = 0.001/metadata['factor']
+            line = line.replace('$FACTOR$', str(fac))
+            line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'velocity.xdmf')
+            line = line.replace('$VECTORNAME1$', metadata['name']+'velocity')
+            out_file.write(line)
+        template.close()
+        out_file.close()
 

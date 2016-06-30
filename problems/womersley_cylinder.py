@@ -125,15 +125,15 @@ class Problem(gp.GeneralProblem):
         self.outflow_area = assemble(one*self.dsOut)
         print('Outflow area:', self.outflow_area)
 
-    def get_boundary_conditions(self, use_pressure_BC):
+    def get_boundary_conditions(self, use_pressure_BC, v_space, p_space):
         # boundary parts: 1 walls, 2 inflow, 3 outflow
         # Boundary conditions
-        bc0 = DirichletBC(self.vSpace, (0.0, 0.0, 0.0), self.facet_function, 1)
-        inflow = DirichletBC(self.vSpace, self.v_in, self.facet_function, 2)
+        bc0 = DirichletBC(v_space, (0.0, 0.0, 0.0), self.facet_function, 1)
+        inflow = DirichletBC(v_space, self.v_in, self.facet_function, 2)
         bcu = [inflow, bc0]
         bcp = []
         if use_pressure_BC:
-            outflow = DirichletBC(self.pSpace, 0.0, self.facet_function, 3)
+            outflow = DirichletBC(p_space, 0.0, self.facet_function, 3)
             bcp = [outflow]
         return bcu, bcp
 

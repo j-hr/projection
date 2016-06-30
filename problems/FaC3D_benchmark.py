@@ -89,16 +89,16 @@ class Problem(gp.GeneralProblem):
         def value_shape(self):
             return (3,)
 
-    def get_boundary_conditions(self, use_pressure_BC):
+    def get_boundary_conditions(self, use_pressure_BC, v_space, p_space):
         # boundary parts: 1 walls, 2, 4 inflow, 3, 5 outflow
         # Boundary conditions
-        bc_wall = DirichletBC(self.vSpace, (0.0, 0.0, 0.0), self.facet_function, 1)
-        bc_cyl = DirichletBC(self.vSpace, (0.0, 0.0, 0.0), self.facet_function, 5)
-        inflow = DirichletBC(self.vSpace, self.v_in, self.facet_function, 2)
+        bc_wall = DirichletBC(v_space, (0.0, 0.0, 0.0), self.facet_function, 1)
+        bc_cyl = DirichletBC(v_space, (0.0, 0.0, 0.0), self.facet_function, 5)
+        inflow = DirichletBC(v_space, self.v_in, self.facet_function, 2)
         bcu = [inflow, bc_cyl, bc_wall]
         bcp = []
         if use_pressure_BC:
-            outflow = DirichletBC(self.pSpace, 0.0, self.facet_function, 3)
+            outflow = DirichletBC(p_space, 0.0, self.facet_function, 3)
             bcp = [outflow]
         return bcu, bcp
 

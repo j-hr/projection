@@ -146,17 +146,17 @@ class Problem(gp.GeneralProblem):
         else:
             return v_m + (v_M-v_m)/3.0 - (a_3*(t-(2.0*T/3.0))*(t-(2.0*T/3.0)))
 
-    def get_boundary_conditions(self, use_pressure_BC):
+    def get_boundary_conditions(self, use_pressure_BC, v_space, p_space):
         # boundary parts: 1 walls, 2, 4 inflow, 3, 5 outflow
         # Boundary conditions
-        bc0 = DirichletBC(self.vSpace, (0.0, 0.0, 0.0), self.facet_function, 1)
-        inflow2 = DirichletBC(self.vSpace, self.v_in_2, self.facet_function, 2)
-        inflow4 = DirichletBC(self.vSpace, self.v_in_4, self.facet_function, 4)
+        bc0 = DirichletBC(v_space, (0.0, 0.0, 0.0), self.facet_function, 1)
+        inflow2 = DirichletBC(v_space, self.v_in_2, self.facet_function, 2)
+        inflow4 = DirichletBC(v_space, self.v_in_4, self.facet_function, 4)
         bcu = [inflow2, inflow4, bc0]
         bcp = []
         if use_pressure_BC:
-            outflow3 = DirichletBC(self.pSpace, 0.0, self.facet_function, 3)  # QQ or 3 or both?
-            outflow5 = DirichletBC(self.pSpace, 0.0, self.facet_function, 5)  # QQ or 3 or both?
+            outflow3 = DirichletBC(p_space, 0.0, self.facet_function, 3)  # QQ or 3 or both?
+            outflow5 = DirichletBC(p_space, 0.0, self.facet_function, 5)  # QQ or 3 or both?
             bcp = [outflow3, outflow5]
         return bcu, bcp
 

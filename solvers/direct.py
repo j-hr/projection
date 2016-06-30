@@ -106,20 +106,20 @@ class Solver(gs.GeneralSolver):
         # Define function spaces (P2-P1)
         self.V = VectorFunctionSpace(mesh, "Lagrange", 2)  # velocity
         self.Q = FunctionSpace(mesh, "Lagrange", 1)  # pressure
-        W = MixedFunctionSpace([self.V, self.Q])
+        self.W = MixedFunctionSpace([self.V, self.Q])
         self.PS = FunctionSpace(mesh, "Lagrange", 2)  # partial solution (must be same order as V)
         self.D = FunctionSpace(mesh, "Lagrange", 1)   # velocity divergence space
 
         # to assign solution in space W.sub(0) to Function(V) we need FunctionAssigner (cannot be assigned directly)
-        fa = FunctionAssigner(self.V, W.sub(0))
+        fa = FunctionAssigner(self.V, self.W.sub(0))
         velSp = Function(self.V)
 
         problem.initialize(self.V, self.Q, self.PS, self.D)
 
         # Define unknown and test function(s) NS
-        v, q = TestFunctions(W)
-        w = Function(W)
-        dw = TrialFunction(W)
+        v, q = TestFunctions(self.W)
+        w = Function(self.W)
+        dw = TrialFunction(self.W)
         u, p = split(w)
 
         # Define fields
@@ -135,7 +135,7 @@ class Solver(gs.GeneralSolver):
             problem.save_vel(False, u0, 0.0)
 
         # boundary conditions
-        bcu, bcp = problem.get_boundary_conditions(self.bc == 'outflow')
+        bcu, bcp = problem.get_boundary_conditions(self.bc == 'outflow', self.W.sub(0), self.W.sub(1))
         # NT bcp is not used
 
         # Define steady part of the equation
@@ -171,7 +171,6 @@ class Solver(gs.GeneralSolver):
         t = dt
         step = 1
         while t < (ttime + dt/2.0):
-            print("t = ", t)
             info("t = %f" % t)
             self.problem.update_time(t, step)
             if self.MPI_rank == 0:
