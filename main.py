@@ -9,22 +9,23 @@ from dolfin.cpp.la import PETScOptions
 import postprocessing
 from time_control import TimeControl
 
-# additional output
-PETScOptions.set('ksp_view')  # shows info about used PETSc Solver and preconditioner
-PETScOptions.set('log_summary')  # QQ useful?
-
 # Resolve input arguments===============================================================================================
 # IFNEED move time, dt, mesh into problem class
 parser = argparse.ArgumentParser()
 parser.add_argument('problem', help='Which problem to solve', choices=['womersley_cylinder', 'steady_cylinder',
                                                                        'FaC3D_benchmark', 'real'])
-parser.add_argument('solver', help='Which solver to use', choices=['ipcs1'])
+parser.add_argument('solver', help='Which solver to use', choices=['ipcs1', 'direct'])
 parser.add_argument('mesh', help='Mesh name')
 parser.add_argument('time', help='Total time', type=float)
 parser.add_argument('dt', help='Time step', type=float)
 parser.add_argument('-n', '--name', help='name of this run instance', default='test')
 parser.add_argument('--out', help='Which processors in parallel should print output?', choices=['all', 'main'], default='main')
 args, remaining = parser.parse_known_args()
+
+# additional output
+PETScOptions.set('ksp_view')  # shows info about used PETSc Solver and preconditioner
+# if args.solver == 'ipcs1':
+    # PETScOptions.set('log_summary')
 
 # Paralell run initialization
 comm = mpi_comm_world()

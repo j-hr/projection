@@ -26,6 +26,7 @@ class GeneralProblem(object):
         self.tc.init_watch('saveP', 'Saved pressure', True)
         self.tc.init_watch('saveVel', 'Saved velocity', True)
         self.tc.init_watch('averageP', 'Averaged pressure', True)
+        self.tc.init_watch('updateBC', 'Updated velocity BC', True)
         self.tc.init_watch('div', 'Computed and saved divergence', True)
         self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
 
@@ -55,6 +56,8 @@ class GeneralProblem(object):
         self.partialSolutionSpace = None  # scalar space of same element type as velocity
 
         self.actual_time = 0.0
+        self.step_number = 0
+        self.save_this_step = False
         self.isWholeSecond = None
         self.N1 = None
         self.N0 = None
@@ -149,6 +152,7 @@ class GeneralProblem(object):
         self.doSave = False
         self.saveOnlyVel = False
         self.doSaveDiff = False
+        self.save_nth = args.savespace
         option = args.save
         if option == 'doSave' or option == 'diff' or option == 'only_vel':
             self.doSave = True
@@ -187,6 +191,7 @@ class GeneralProblem(object):
         parser.add_argument('-e', '--error', help='Error control mode', choices=['doEC', 'noEC', 'test'], default='doEC')
         parser.add_argument('-S', '--save', help='Save solution mode', choices=['doSave', 'noSave', 'diff', 'only_vel'],
                             default='noSave')
+        parser.add_argument('--savespace', help='save only n-th step in first cycle', type=int, default=1)
         #   doSave: create .xdmf files with velocity, pressure, divergence
         #   diff: save also difference vel-sol
         #   noSave: do not create .xdmf files with velocity, pressure, divergence
@@ -343,14 +348,23 @@ class GeneralProblem(object):
     def get_p_solution(self, t):
         pass
 
-    def update_time(self, actual_time):
+    def update_time(self, actual_time, step_number):
         self.actual_time = actual_time
+        self.step_number = step_number
         self.time_list.append(self.actual_time)
         if self.onset < 0.001 or self.actual_time > self.onset:
             self.onset_factor = 1.
         else:
             self.onset_factor = (1. - cos(pi * actual_time / self.onset))*0.5
         info('Onset factor: %f' % self.onset_factor)
+
+        # save only n-th step in first second
+        if self.doSave:
+            if self.save_nth == 1 or actual_time > (1. - self.metadata['dt']/2.) or self.step_number % self.save_nth == 0:
+                self.save_this_step = True
+            else:
+                self.save_this_step = False
+
 
     def compute_functionals(self, velocity, pressure, t):
         dsgml = sqrt(assemble((1./self.mesh_volume)*inner(div(2*sym(grad(velocity))-grad(velocity)), div(2*sym(grad(velocity))-grad(velocity)))*dx))

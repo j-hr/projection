@@ -163,8 +163,8 @@ class Problem(gp.GeneralProblem):
         p = interpolate(womersleyBC.average_analytic_pressure_expr(self.factor), self.pSpace)
         return p
 
-    def update_time(self, actual_time):
-        super(Problem, self).update_time(actual_time)
+    def update_time(self, actual_time, step_number):
+        super(Problem, self).update_time(actual_time, step_number)
         if self.actual_time > 0.5 and int(round(self.actual_time * 1000)) % 1000 == 0:
             self.isWholeSecond = True
             seconds = int(round(self.actual_time))

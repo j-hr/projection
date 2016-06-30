@@ -92,6 +92,7 @@ class Solver(gs.GeneralSolver):
     def solve(self, problem):
         self.problem = problem
         doSave = problem.doSave
+        save_this_step = False
         onlyVel = problem.saveOnlyVel
         dt = self.metadata['dt']
 
@@ -362,11 +363,15 @@ class Solver(gs.GeneralSolver):
         info("Running of Incremental pressure correction scheme n. 1")
         ttime = self.metadata['time']
         t = dt
+        step = 1
         while t < (ttime + dt/2.0):
             info("t = %f" % t)
-            self.problem.update_time(t)
+            self.problem.update_time(t, step)
             if self.MPI_rank == 0:
                 problem.write_status_file(t)
+
+            if doSave:
+                save_this_step = problem.save_this_step
 
             # DDN debug
             # u_ext_in = assemble(inner(u_ext, n)*problem.get_outflow_measure_form())
@@ -398,11 +403,11 @@ class Solver(gs.GeneralSolver):
                 self.tc.start('solve 1')
                 self.solver_vel_tent.solve(A1, u_.vector(), b)
                 self.tc.end('solve 1')
-                if doSave:
+                if save_this_step:
                     self.tc.start('saveVel')
                     problem.save_vel(True, u_, t)
                     self.tc.end('saveVel')
-                if doSave and not onlyVel:
+                if save_this_step and not onlyVel:
                     problem.save_div(True, u_)
                 problem.compute_err(True, u_, t)
                 problem.compute_div(True, u_)
@@ -453,20 +458,20 @@ class Solver(gs.GeneralSolver):
                 else:
                     foo.assign(p_+p0)
                 problem.averaging_pressure(foo)
-                if doSave and not onlyVel:
+                if save_this_step and not onlyVel:
                     problem.save_pressure(True, foo)
             else:
                 if self.bc == 'lagrange':
                     fa.assign(pQ, p_QL.sub(0))
                     problem.averaging_pressure(pQ)
-                    if doSave and not onlyVel:
+                    if save_this_step and not onlyVel:
                         problem.save_pressure(False, pQ)
                 else:
                     # we do not want to change p=0 on outflow, it conflicts with do-nothing conditions
                     foo = Function(self.Q)
                     foo.assign(p_)
                     problem.averaging_pressure(foo)
-                    if doSave and not onlyVel:
+                    if save_this_step and not onlyVel:
                         problem.save_pressure(False, foo)
             end()
 
@@ -487,11 +492,11 @@ class Solver(gs.GeneralSolver):
             except RuntimeError as inst:
                 problem.report_fail(t)
                 return 1
-            if doSave:
+            if save_this_step:
                 self.tc.start('saveVel')
                 problem.save_vel(False, u_cor, t)
                 self.tc.end('saveVel')
-            if doSave and not onlyVel:
+            if save_this_step and not onlyVel:
                 problem.save_div(False, u_cor)
             end()
 
@@ -514,7 +519,7 @@ class Solver(gs.GeneralSolver):
                     problem.report_fail(t)
                     return 1
                 problem.averaging_pressure(p_mod)
-                if doSave and not onlyVel:
+                if save_this_step and not onlyVel:
                     problem.save_pressure(False, p_mod)
                 end()
 
@@ -537,6 +542,7 @@ class Solver(gs.GeneralSolver):
                     p0.assign(p_)
 
             t = round(t + dt, 6)  # round time step to 0.000001
+            step += 1
             self.tc.end('next')
 
         info("Finished: Incremental pressure correction scheme n. 1")
