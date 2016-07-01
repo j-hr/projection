@@ -6,7 +6,7 @@ from dolfin.cpp.function import near
 from dolfin.cpp.mesh import Mesh, MeshFunction, FacetFunction, vertices, facets
 from math import sqrt
 from ufl import Measure, FacetNormal, inner, ds, div, transpose, grad, dx, sym
-
+import csv
 from problems import general_problem as gp
 
 
@@ -34,43 +34,72 @@ class Problem(gp.GeneralProblem):
             exit('Bad mesh, should be some from %s' % str(self.compatible_meshes))
         self.mesh, self.facet_function = super(Problem, self).loadMesh(args.mesh)
         info("Mesh name: " + args.mesh + "    " + str(self.mesh))
+        f_ini = open('meshes/'+args.mesh+'.ini', 'r')
+        reader = csv.reader(f_ini, delimiter=' ', escapechar='\\')
+
+        obj = None
+        self.interfaces = []
+        for row in reader:
+            if not row:
+                pass
+            elif row[0] == 'volume':
+                self.mesh_volume = float(row[1])
+            elif row[0] == 'in':
+                if obj is not None:
+                    self.interfaces.append(obj)
+                obj = {'inflow': True, 'number': row[1]}
+            elif row[0] == 'out':
+                if obj is not None:
+                    self.interfaces.append(obj)
+                obj = {'inflow': False, 'number': row[1]}
+            else:
+                if len(row) == 2:  # scalar values
+                    obj[row[0]] = row[1]
+                else:                # vector values
+                    obj[row[0]] = [float(f) for f in row[1:]]
+        self.interfaces.append(obj)
+        f_ini.close()
+
+        self.outflow_area = 0
+        self.inflows = []
+        self.outflows = []
+        for obj in self.interfaces:
+            if not obj['inflow']:
+                self.outflow_area += float(obj['S'])
+                self.outflows.append(obj)
+            else:
+                self.inflows.append(obj)
+        info('Outflow area: %f' % self.outflow_area)
+
         # self.dsWall = Measure("ds", subdomain_id=1, subdomain_data=self.facet_function)
-        self.mesh_volume = 564.938845339
         self.normal = FacetNormal(self.mesh)
-        self.dsOut1 = Measure("ds", subdomain_id=3, subdomain_data=self.facet_function)
-        self.dsOut2 = Measure("ds", subdomain_id=5, subdomain_data=self.facet_function)
-        self.dsIn1 = Measure("ds", subdomain_id=2, subdomain_data=self.facet_function)
-        self.dsIn2 = Measure("ds", subdomain_id=4, subdomain_data=self.facet_function)
+
+        # generate measures, collect measure lists
+        self.inflow_measures = []
+        for obj in self.interfaces:
+            obj['measure'] = Measure("ds", subdomain_id=int(obj['number']), subdomain_data=self.facet_function)
+            if obj['inflow']:
+                self.inflow_measures.append(obj['measure'])
+            else:
+                self.outflow_measures.append(obj['measure'])
+
         self.listDict.update({
             'outflow': {'list': [], 'name': 'outflow rate', 'abrev': 'OUT', 'slist': []},
-            'outflow1': {'list': [], 'name': 'outflow rate back', 'abrev': 'OUT1', 'slist': []},
-            'outflow2': {'list': [], 'name': 'outflow rate front', 'abrev': 'OUT2', 'slist': []},
             'inflow': {'list': [], 'name': 'inflow rate', 'abrev': 'IN', 'slist': []},
             'oiratio': {'list': [], 'name': 'outflow/inflow ratio (mass conservation)', 'abrev': 'O/I', 'slist': []},
         })
-
+        for obj in self.outflows:
+            n = obj['number']
+            self.listDict.update({'outflow' + n:
+                                      {'list': [], 'name': 'outflow rate ' + n, 'abrev': 'OUT' + n, 'slist': []}})
         self.can_force_outflow = True
-
         self.actual_time = None
-        self.v_in_2 = None
-        self.v_in_2_normal = [0.0, 1.0, 0.0]
-        self.v_in_2_center = [1.59128, -13.6391, 7.24912]
-        self.v_in_2_r = 1.01077
-        self.v_in_4 = None
-        self.v_in_4_normal = [0.1, -1.0, -0.37]
-        self.v_in_4_center = [-4.02584, 7.70146, 8.77694]
-        self.v_in_4_r = 0.553786
-
-    # TODO move to general using get_outflow_measures()
-    def compute_outflow(self, velocity):
-        out = assemble(inner(velocity, self.normal)*self.dsOut1 + inner(velocity, self.normal)*self.dsOut2)
-        return out
 
     def get_outflow_measures(self):
-        return [self.dsOut1, self.dsOut2]
+        return self.outflow_measures
 
     def get_outflow_measure_form(self):
-        return self.dsOut1 + self.dsOut2
+        return sum(m for m in self.outflow_measures)
 
     def __str__(self):
         return 'test on real mesh'
@@ -87,13 +116,10 @@ class Problem(gp.GeneralProblem):
         info("IC type: " + self.ic)
         info("Velocity scale factor = %4.2f" % self.factor)
 
-        self.v_in_2 = Problem.InputVelocityProfile(self.factor, self.v_in_2_center, self.v_in_2_normal, self.v_in_2_r)
-        self.v_in_4 = Problem.InputVelocityProfile(self.factor, self.v_in_4_center, self.v_in_4_normal, self.v_in_4_r)
-
-        # TODO move to general using get_outflow_measures method
-        one = (interpolate(Expression('1.0'), Q))
-        self.outflow_area = assemble(one*self.dsOut1 + one*self.dsOut2)
-        info('Outflow area: %f' % self.outflow_area)
+        # generate inflow profiles
+        for obj in self.inflows:
+            obj['velocity_profile'] = Problem.InputVelocityProfile(self.factor*float(obj['reference_coef']), obj['center'],
+                                                                   obj['normal'], float(obj['radius']))
 
     class InputVelocityProfile(Expression):
         def __init__(self, factor, center, normal, radius, **kwargs):
@@ -147,17 +173,16 @@ class Problem(gp.GeneralProblem):
             return v_m + (v_M-v_m)/3.0 - (a_3*(t-(2.0*T/3.0))*(t-(2.0*T/3.0)))
 
     def get_boundary_conditions(self, use_pressure_BC, v_space, p_space):
-        # boundary parts: 1 walls, 2, 4 inflow, 3, 5 outflow
+        # boundary parts: 1 walls, inflows and outflows specified in [meshName].ini file
         # Boundary conditions
         bc0 = DirichletBC(v_space, (0.0, 0.0, 0.0), self.facet_function, 1)
-        inflow2 = DirichletBC(v_space, self.v_in_2, self.facet_function, 2)
-        inflow4 = DirichletBC(v_space, self.v_in_4, self.facet_function, 4)
-        bcu = [inflow2, inflow4, bc0]
+        bcu = [bc0]
+        for obj in self.inflows:
+            bcu.append(DirichletBC(v_space, obj['velocity_profile'], self.facet_function, int(obj['number'])))
         bcp = []
         if use_pressure_BC:
-            outflow3 = DirichletBC(p_space, 0.0, self.facet_function, 3)  # QQ or 3 or both?
-            outflow5 = DirichletBC(p_space, 0.0, self.facet_function, 5)  # QQ or 3 or both?
-            bcp = [outflow3, outflow5]
+            for obj in self.outflows:
+                bcp.append(DirichletBC(p_space, 0., self.facet_function, int(obj['number'])))
         return bcu, bcp
 
     def get_initial_conditions(self, function_list):
@@ -183,13 +208,11 @@ class Problem(gp.GeneralProblem):
 
         # Update boundary condition
         self.tc.start('updateBC')
-        self.v_in_2.t = actual_time
-        self.v_in_2.onset_factor = self.onset_factor
-        self.v_in_4.t = actual_time
-        self.v_in_4.onset_factor = self.onset_factor
-        in1 = assemble(inner(self.v_in_2, self.normal)*self.dsIn1)
-        in2 = assemble(inner(self.v_in_4, self.normal)*self.dsIn2)
-        self.last_inflow = in1+in2
+        self.last_inflow = 0
+        for obj in self.inflows:
+            obj['velocity_profile'].t = actual_time
+            obj['velocity_profile'].onset_factor = self.onset_factor
+            self.last_inflow += assemble(inner(obj['velocity_profile'], self.normal)*obj['measure'])
         info('Inflow: %f' % self.last_inflow)
         self.listDict['inflow']['list'].append(self.last_inflow)
 
@@ -203,11 +226,11 @@ class Problem(gp.GeneralProblem):
 
     def compute_functionals(self, velocity, pressure, t):
         super(Problem, self).compute_functionals(velocity, pressure, t)
-        out1 = assemble(inner(velocity, self.normal)*self.dsOut1)
-        out2 = assemble(inner(velocity, self.normal)*self.dsOut2)
-        out = out1 + out2
-        self.listDict['outflow1']['list'].append(out1)
-        self.listDict['outflow2']['list'].append(out2)
+        out = 0
+        for obj in self.outflows:
+            outflow = assemble(inner(velocity, self.normal)*obj['measure'])
+            out += outflow
+            self.listDict['outflow'+obj['number']]['list'].append(outflow)
         self.listDict['outflow']['list'].append(out)
         info('Outflow: %f' % out)
         self.last_status_functional = out/abs(self.last_inflow)

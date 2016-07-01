@@ -147,7 +147,8 @@ class Solver(gs.GeneralSolver):
 
         # Define variational forms
         F_ns = (inner((u - u0), v) / k) * dx + (1.0 - theta) * F(u0, v, q) + theta * F(u, v, q)
-        J_ns = derivative(F_ns, w, dw)    # QQ J_ns = derivative(F_ns, w) did not work
+        J_ns = derivative(F_ns, w, dw)
+        # J_ns = derivative(F_ns, w)  # did not work
 
         # NS_problem = NonlinearVariationalProblem(F_ns, w, bcu, J_ns, form_compiler_parameters=ffc_options)
         NS_problem = NonlinearVariationalProblem(F_ns, w, bcu, J_ns)

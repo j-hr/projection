@@ -5,9 +5,9 @@ from dolfin import *
 # names = ['cyl_c1', 'cyl_d1', 'cyl_c2', 'cyl_d2', 'cyl_c3', 'cyl_c3o', 'cyl_d3', 'cyl_e3']
 # names = ['cyl_c1', 'cyl_c2', 'cyl_c3', 'cyl_c3o', 'cyl_c3o_netgen', 'cyl15_3']
 # names = ['HYK']
-names = ['novasit', 'HYK']
+names = ['HYK_120']
 
-doPlotQualityHistogram = True
+doPlotQualityHistogram = False
 doComputeVolume = False
 
 for meshName in names:
@@ -15,7 +15,7 @@ for meshName in names:
     cell_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_physical_region.xml")
     facet_function = MeshFunction("size_t", mesh, "meshes/" + meshName + "_facet_region.xml")
 
-    #plot(facet_function, interactive=True)
+    plot(facet_function, interactive=True)
 
     # mesh = refine(mesh)
     # plot(mesh, interactive=True)

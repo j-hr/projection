@@ -35,6 +35,9 @@ class GeneralProblem(object):
         # 2. implement self.compute_outflow and get_outflow_measures
         self.can_force_outflow = False
         self.outflow_area = None
+        self.normal = None
+        self.mesh_volume = None
+        self.outflow_measures = []
 
         # stopping criteria (for relative H1 velocity error norm) (if known)
         self.divergence_treshold = 10
@@ -371,9 +374,13 @@ class GeneralProblem(object):
         self.listDict['dgt']['list'].append(dgt)
 
     def compute_outflow(self, velocity):
-        pass
+        out = assemble(inner(velocity, self.normal)*self.get_outflow_measure_form())
+        return out
 
     def get_outflow_measures(self):
+        pass
+
+    def get_outflow_measure_form(self):
         pass
 
     def get_metadata_to_save(self):
