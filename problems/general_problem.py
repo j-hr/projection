@@ -1,11 +1,12 @@
 from __future__ import print_function
 import os, sys, traceback
 import csv, cPickle
-from dolfin import Function, assemble, interpolate, Expression, project, norm, errornorm
+from dolfin import Function, assemble, interpolate, Expression, project, norm, errornorm, TensorFunctionSpace, plot, \
+    FunctionSpace, VectorFunctionSpace
 from dolfin.cpp.common import mpi_comm_world, toc, MPI, info
 from dolfin.cpp.io import XDMFFile, HDF5File
-from dolfin.cpp.mesh import Mesh, MeshFunction
-from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl
+from dolfin.cpp.mesh import Mesh, MeshFunction, SubMesh, BoundaryMesh
+from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl, Identity, FacetNormal, dot
 from math import sqrt, pi, cos
 
 
@@ -36,6 +37,8 @@ class GeneralProblem(object):
         self.can_force_outflow = False
         self.outflow_area = None
         self.normal = None
+        self.mesh = None
+        self.facet_function = None
         self.mesh_volume = None
         self.outflow_measures = []
 
@@ -90,6 +93,7 @@ class GeneralProblem(object):
         #                          'pg2D': {'name': 'pressure_grad_tent_diff'}}
         self.fileDictLDSG = {'ldsg': {'name': 'ldsg'},
                              'ldsg2': {'name': 'ldsg_tent'}}
+        self.fileDictWSS = {'wss': {'name': 'wss'}, }
 
         # lists of functionals and other scalar output data
         self.time_list = []  # list of times, when error is  measured (used in report)
@@ -110,8 +114,8 @@ class GeneralProblem(object):
                    'norm': self.pg_normalization_factor},
             'pg2': {'list': [], 'name': 'computed pressure tent gradient', 'abrev': 'PTG', 'scale': self.scale_factor,
                     'norm': self.pg_normalization_factor},
-            'dsg-l': {'list': [], 'name': 'div(2sym(grad(u))-laplace(u))', 'abrev': 'DSG-L'},  # div(2sym(grad(u))-laplace(u))
-            'dgt': {'list': [], 'name': 'div(transpose(grad(u)))', 'abrev': 'DGT'},  # div(transpose(grad(u)))
+            # 'dsg-l': {'list': [], 'name': 'div(2sym(grad(u))-laplace(u))', 'abrev': 'DSG-L'},  # div(2sym(grad(u))-laplace(u))
+            # 'dgt': {'list': [], 'name': 'div(transpose(grad(u)))', 'abrev': 'DGT'},  # div(transpose(grad(u)))
         }
         if self.has_analytic_solution:
             self.listDict.update({
@@ -200,6 +204,7 @@ class GeneralProblem(object):
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=1.0)
         parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.0)
         parser.add_argument('--ldsg', help='save laplace(u) - div(2sym(grad(u))) difference', action='store_true')
+        parser.add_argument('--wss', help='compute wall shrear stress', action='store_true')
 
     @staticmethod
     def loadMesh(mesh):
@@ -245,6 +250,8 @@ class GeneralProblem(object):
                 self.fileDict.update(self.fileDictTentPDiff)
         if self.args.ldsg:
             self.fileDict.update(self.fileDictLDSG)
+        if self.args.wss:
+            self.fileDict.update(self.fileDictWSS)
         # create files
         for key, value in self.fileDict.iteritems():
             value['file'] = XDMFFile(mpi_comm_world(), self.str_dir_name + "/" + self.problem_code + '_' +
@@ -366,12 +373,41 @@ class GeneralProblem(object):
             else:
                 self.save_this_step = False
 
-
     def compute_functionals(self, velocity, pressure, t):
-        dsgml = sqrt(assemble((1./self.mesh_volume)*inner(div(2*sym(grad(velocity))-grad(velocity)), div(2*sym(grad(velocity))-grad(velocity)))*dx))
-        dgt = sqrt(assemble((1./self.mesh_volume)*inner(div(transpose(grad(velocity))), div(transpose(grad(velocity))))*dx))
-        self.listDict['dsg-l']['list'].append(dsgml)
-        self.listDict['dgt']['list'].append(dgt)
+        if self.args.wss:
+            info('Computing stress tensor')
+            I = Identity(velocity.geometric_dimension())
+            T = TensorFunctionSpace(self.mesh, 'Lagrange', 1)
+            stress = project(-pressure*I + 2*sym(grad(velocity)), T)
+            info('Generating boundary mesh')
+            wall_mesh = BoundaryMesh(self.mesh, 'exterior')
+            # wall_mesh = SubMesh(self.mesh, self.facet_function, 1)   # QQ why does not work?
+            # plot(wall_mesh, interactive=True)
+            info('  Boundary mesh geometric dim: %d' % wall_mesh.geometry().dim())
+            info('  Boundary mesh topologic dim: %d' % wall_mesh.topology().dim())
+            info('Projecting stress to boundary mesh')
+            Tb = TensorFunctionSpace(wall_mesh, 'Lagrange', 1)
+            stress_b = interpolate(stress, Tb)
+            self.fileDict['wss']['file'] << stress_b
+
+
+            if False:  # does not work
+                info('Computing WSS')
+                n = FacetNormal(wall_mesh)
+                info(stress_b, True)
+                # wss = stress_b*n - inner(stress_b*n, n)*n
+                wss = dot(stress_b, n) - inner(dot(stress_b, n), n)*n   # equivalent
+                Vb = VectorFunctionSpace(wall_mesh, 'Lagrange', 1)
+                Sb = FunctionSpace(wall_mesh, 'Lagrange', 1)
+                # wss_func = project(wss, Vb)
+                wss_norm = project(sqrt(inner(wss, wss)), Sb)
+                plot(wss_norm, interactive=True)
+
+        # following was used to test laplace and stress formulation differences
+        # dsgml = sqrt(assemble((1./self.mesh_volume)*inner(div(2*sym(grad(velocity))-grad(velocity)), div(2*sym(grad(velocity))-grad(velocity)))*dx))
+        # dgt = sqrt(assemble((1./self.mesh_volume)*inner(div(transpose(grad(velocity))), div(transpose(grad(velocity))))*dx))
+        # self.listDict['dsg-l']['list'].append(dsgml)
+        # self.listDict['dgt']['list'].append(dgt)
 
     def compute_outflow(self, velocity):
         out = assemble(inner(velocity, self.normal)*self.get_outflow_measure_form())
