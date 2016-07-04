@@ -330,8 +330,8 @@ class Solver(gs.GeneralSolver):
         # apply global options for Krylov solvers
         self.solver_vel_tent.parameters['relative_tolerance'] = 10 ** (-self.precision_rel_v_tent)
         self.solver_vel_tent.parameters['absolute_tolerance'] = 10 ** (-self.precision_abs_v_tent)
-        self.solver_vel_cor.parameters['relative_tolerance'] = 10E-6
-        self.solver_vel_cor.parameters['absolute_tolerance'] = 10E-10
+        self.solver_vel_cor.parameters['relative_tolerance'] = 10E-12
+        self.solver_vel_cor.parameters['absolute_tolerance'] = 10E-4
         self.solver_p.parameters['relative_tolerance'] = 10**(-self.precision_p)
         self.solver_p.parameters['absolute_tolerance'] = 10E-10
         if self.useRotationScheme:
