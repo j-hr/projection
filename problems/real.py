@@ -131,7 +131,7 @@ class Problem(gp.GeneralProblem):
     class InputVelocityProfile(Expression):
         def __init__(self, factor, center, normal, radius, **kwargs):
             # super(Expression, self).__init__()
-            super(Problem.InputVelocityProfile, self).__init__(**kwargs)
+            #super(Problem.InputVelocityProfile, self).__init__(**kwargs)
             self.t = 0.
             self.onset_factor = 1.
             self.factor = factor
