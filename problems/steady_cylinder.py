@@ -201,7 +201,7 @@ class Problem(gp.GeneralProblem):
             self.listDict['u2H1w' if is_tent else 'u_H1w']['slist'].append(
                 sqrt(sum([i*i for i in er_list_H1w[self.N0:self.N1]])/self.stepsInSecond))
 
-    def compute_functionals(self, velocity, pressure, t):
+    def compute_functionals(self, velocity, pressure, t, step):
         super(Problem, self).compute_functionals(velocity, pressure, t)
         self.compute_force(velocity, pressure, t)
 

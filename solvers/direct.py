@@ -216,7 +216,7 @@ class Solver(gs.GeneralSolver):
                 problem.save_pressure(False, p)
 
             # compute functionals (e. g. forces)
-            problem.compute_functionals(u, p, t)
+            problem.compute_functionals(u, p, t, step)
 
             # Move to next time step
             self.tc.start('next')

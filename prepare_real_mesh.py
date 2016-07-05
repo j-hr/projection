@@ -1,15 +1,15 @@
 from __future__ import print_function
 
-from dolfin import interpolate, Expression, assemble
+from dolfin import interpolate, Expression, assemble, plot
 from dolfin.cpp.common import mpi_comm_world
-from dolfin.cpp.io import HDF5File
+from dolfin.cpp.io import HDF5File, interactive
 from dolfin.cpp.mesh import Mesh, FacetFunction, facets, edges, vertices
 from dolfin.functions import FacetNormal, FunctionSpace
 from ufl import Measure, dx
 
 import itertools, csv
 
-meshName = 'HYK'
+meshName = 'HYK3'
 
 # INPUT DATA ============================
 # OLD input data at the end of a file
@@ -19,16 +19,15 @@ meshName = 'HYK'
 # should work for any number of inflows and outflows as longe any two are not in same plane
 # planes can intersect rest of the geometry, as is improbable that any exterior facet will have all vertices in given planes
 # otherwise it would be necessary to check distance from centerpoint
-
 inflows = [
-    {'number': 2, 'normal': [0.0, 1.0, 0.0], 'center': [1.59128, -13.6391, 7.24912], 'radius': 1.01077,
+    {'number': 2, 'normal': [0.0, 1.0, 0.0], 'center': [6.40697, 0.344021, 13.8723], 'radius': 1.10057,
      'reference_radius': 1.01077},
-    {'number': 4, 'normal': [0.1, -1.0, -0.37], 'center': [-4.02584, 7.70146, 8.77694], 'radius': 0.553786,
+    {'number': 4, 'normal': [0.0933764, -0.933764, -0.345493], 'center': [0.779737, 20.9159, 15.1405], 'radius': 0.620773,
      'reference_radius': 0.553786},
 ]
 outflows = [
-    {'number': 3, 'normal': [-0.838444, 0.0, 0.544988], 'center': [11.3086, -0.985461, -5.64479]},
-    {'number': 5, 'normal': [-1.0, 0.0, 0.0], 'center': [20.6585, -1.38651, -1.24815]},
+    {'number': 3, 'normal': [-0.838444, 0, 0.544988], 'center': [15.2517, 12.5227, 1.45616]},
+    {'number': 5, 'normal': [-1.0, 0.0, 0.0], 'center': [23.0346, 12.2879, 5.18944]},
 ]
 number_list = [2, 3, 4, 5]  # numbers of inflows, outflows, '1' is reserved for walls
 # END OF INPUT ==============================
@@ -78,6 +77,8 @@ for f_mesh in facets(mesh):
         if not set:
             facet_function[f_mesh] = 1   # wall
 
+plot(facet_function)
+
 f_mesh = HDF5File(mpi_comm_world(), 'meshes/' + meshName + '.hdf5', 'w')
 f_mesh.write(mesh, 'mesh')
 f_mesh.write(facet_function, 'facet_function')
@@ -114,7 +115,45 @@ for outf in outflows:
 
 f_ini.close()
 
+interactive()
+
 exit()
 # OLD INPUT DATA =====================
+# HYK:
+inflows = [
+    {'number': 2, 'normal': [0.0, 1.0, 0.0], 'center': [1.59128, -13.6391, 7.24912], 'radius': 1.01077,
+     'reference_radius': 1.01077},
+    {'number': 4, 'normal': [0.1, -1.0, -0.37], 'center': [-4.02584, 7.70146, 8.77694], 'radius': 0.553786,
+     'reference_radius': 0.553786},
+]
+outflows = [
+    {'number': 3, 'normal': [-0.838444, 0.0, 0.544988], 'center': [11.3086, -0.985461, -5.64479]},
+    {'number': 5, 'normal': [-1.0, 0.0, 0.0], 'center': [20.6585, -1.38651, -1.24815]},
+]
+number_list = [2, 3, 4, 5]  # numbers of inflows, outflows, '1' is reserved for walls
 
+# HYK10:
+inflows = [
+    {'number': 2, 'normal': [0.0, 1.0, 0.0], 'center': [6.33843,  0.376,  13.7689], 'radius': 1.13127,
+     'reference_radius': 1.01077},
+    {'number': 4, 'normal': [0.0933764, -0.933764, -0.345493], 'center': [0.735854, 20.9663, 14.9601], 'radius': 0.626346,
+     'reference_radius': 0.553786},
+]
+outflows = [
+    {'number': 3, 'normal': [-0.838444, 0.0, 0.544988], 'center': [15.2583, 12.5144, 1.43734]},
+    {'number': 5, 'normal': [-1.0, 0.0, 0.0], 'center': [23.0351,  12.2325,  5.19995]},
+]
+number_list = [2, 3, 4, 5]  # numbers of inflows, outflows, '1' is reserved for walls
 
+# HYK3
+inflows = [
+    {'number': 2, 'normal': [0.0, 1.0, 0.0], 'center': [6.40697, 0.344021, 13.8723], 'radius': 1.10057,
+     'reference_radius': 1.01077},
+    {'number': 4, 'normal': [0.0933764, -0.933764, -0.345493], 'center': [0.779737, 20.9159, 15.1405], 'radius': 0.620773,
+     'reference_radius': 0.553786},
+]
+outflows = [
+    {'number': 3, 'normal': [-0.838444, 0, 0.544988], 'center': [15.2517, 12.5227, 1.45616]},
+    {'number': 5, 'normal': [-1.0, 0.0, 0.0], 'center': [23.0346, 12.2879, 5.18944]},
+]
+number_list = [2, 3, 4, 5]  # numbers of inflows, outflows, '1' is reserved for walls

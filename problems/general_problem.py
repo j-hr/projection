@@ -3,12 +3,12 @@ import os, sys, traceback
 import csv, cPickle
 from dolfin import Function, assemble, interpolate, Expression, project, norm, errornorm, TensorFunctionSpace, plot, \
     FunctionSpace, VectorFunctionSpace
-from dolfin.cpp.common import mpi_comm_world, toc, MPI, info
+from dolfin.cpp.common import mpi_comm_world, toc, MPI, info, begin, end
 from dolfin.cpp.io import XDMFFile, HDF5File
 from dolfin.cpp.mesh import Mesh, MeshFunction, SubMesh, BoundaryMesh
 from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl, Identity, FacetNormal, dot
 from math import sqrt, pi, cos
-
+import numpy as np
 
 class GeneralProblem(object):
     def __init__(self, args, tc, metadata):
@@ -30,6 +30,8 @@ class GeneralProblem(object):
         self.tc.init_watch('updateBC', 'Updated velocity BC', True)
         self.tc.init_watch('div', 'Computed and saved divergence', True)
         self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
+        self.tc.init_watch('WSSinit', 'Initialized mesh for WSS', False)
+        self.tc.init_watch('WSS', 'Computed and saved WSS', True)
 
         # If it is sensible (and implemented) to force pressure gradient on outflow boundary
         # 1. set self.outflow_area in initialize
@@ -76,6 +78,17 @@ class GeneralProblem(object):
         self.analytic_v_norm_H1 = None
         self.analytic_v_norm_H1w = None
 
+        # for WSS generation
+        metadata['hasWSS'] = (args.wss != 'none')
+        self.T = None
+        self.I = None
+        self.Tb = None
+        self.wall_mesh = None
+        self.Vb = None
+        self.Sb = None
+        self.nb = None
+        self.peak_time_step = None
+
         # dictionaries for output files
         self.fileDict = {'u': {'name': 'velocity'},
                          'p': {'name': 'pressure'},
@@ -93,7 +106,8 @@ class GeneralProblem(object):
         #                          'pg2D': {'name': 'pressure_grad_tent_diff'}}
         self.fileDictLDSG = {'ldsg': {'name': 'ldsg'},
                              'ldsg2': {'name': 'ldsg_tent'}}
-        self.fileDictWSS = {'wss': {'name': 'wss'}, }
+        self.fileDictWSS = {#'stress': {'name': 'stress'},
+             'wss': {'name': 'wss'}, 'wss_norm': {'name': 'wss_norm'}, }
 
         # lists of functionals and other scalar output data
         self.time_list = []  # list of times, when error is  measured (used in report)
@@ -204,7 +218,7 @@ class GeneralProblem(object):
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=1.0)
         parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.0)
         parser.add_argument('--ldsg', help='save laplace(u) - div(2sym(grad(u))) difference', action='store_true')
-        parser.add_argument('--wss', help='compute wall shrear stress', action='store_true')
+        parser.add_argument('--wss', help='compute wall shear stress', choices=['none', 'all', 'peak'], default='none')
 
     @staticmethod
     def loadMesh(mesh):
@@ -231,6 +245,26 @@ class GeneralProblem(object):
             self.initialize_xdmf_files()
         self.stepsInSecond = int(round(1.0 / self.metadata['dt']))
         info('stepsInSecond = %d' % self.stepsInSecond)
+
+        if self.args.wss != 'none':
+            # NT implemented in general_problem, but sensible only in womersley_cylinder and real
+            # but everything about wss is ommited as long one does not use --wss '...'
+            self.peak_time_step = int(round(0.188/self.metadata['dt']))
+            info('Peak time step at every %dth step in %d steps'%(self.peak_time_step, self.stepsInSecond))
+            self.tc.start('WSSinit')
+            self.I = Identity(self.mesh.geometry().dim())
+            self.T = TensorFunctionSpace(self.mesh, 'Lagrange', 1)
+            info('Generating boundary mesh')
+            self.wall_mesh = BoundaryMesh(self.mesh, 'exterior')
+            info('  Boundary mesh geometric dim: %d' % self.wall_mesh.geometry().dim())
+            info('  Boundary mesh topologic dim: %d' % self.wall_mesh.topology().dim())
+            self.Tb = TensorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
+            self.Vb = VectorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
+            self.Sb = FunctionSpace(self.wall_mesh, 'DG', 1)
+            info('Generating normal to boundary')
+            self.nb = self.get_facet_normal(self.wall_mesh)
+            self.tc.end('WSSinit')
+
 
     def initialize_xdmf_files(self):
         info('  Initializing output files.')
@@ -373,35 +407,54 @@ class GeneralProblem(object):
             else:
                 self.save_this_step = False
 
-    def compute_functionals(self, velocity, pressure, t):
-        if self.args.wss:
-            info('Computing stress tensor')
-            I = Identity(velocity.geometric_dimension())
-            T = TensorFunctionSpace(self.mesh, 'Lagrange', 1)
-            stress = project(-pressure*I + 2*sym(grad(velocity)), T)
-            info('Generating boundary mesh')
-            wall_mesh = BoundaryMesh(self.mesh, 'exterior')
-            # wall_mesh = SubMesh(self.mesh, self.facet_function, 1)   # QQ why does not work?
-            # plot(wall_mesh, interactive=True)
-            info('  Boundary mesh geometric dim: %d' % wall_mesh.geometry().dim())
-            info('  Boundary mesh topologic dim: %d' % wall_mesh.topology().dim())
-            info('Projecting stress to boundary mesh')
-            Tb = TensorFunctionSpace(wall_mesh, 'Lagrange', 1)
-            stress_b = interpolate(stress, Tb)
-            self.fileDict['wss']['file'] << stress_b
+    # following is hack taken from
+    # https://bitbucket.org/fenics-project/dolfin/issues/53/dirichlet-boundary-conditions-of-the-form
+    @staticmethod
+    def get_facet_normal(bmesh):
+        '''Manually calculate FacetNormal function for 2D boundary mesh in 3D space'''
+        vertices = bmesh.coordinates()
+        cells = bmesh.cells()   # gives list of cells, each cell is list of three vector indices
 
+        vec1 = vertices[cells[:, 1]] - vertices[cells[:, 0]]   # create vectors by substracting coordinates of vertices
+        vec2 = vertices[cells[:, 2]] - vertices[cells[:, 0]]
+        normals = np.cross(vec1, vec2)
+        normals /= np.sqrt((normals**2).sum(axis=1))[:, np.newaxis]   # normalize
 
-            if False:  # does not work
-                info('Computing WSS')
-                n = FacetNormal(wall_mesh)
-                info(stress_b, True)
-                # wss = stress_b*n - inner(stress_b*n, n)*n
-                wss = dot(stress_b, n) - inner(dot(stress_b, n), n)*n   # equivalent
-                Vb = VectorFunctionSpace(wall_mesh, 'Lagrange', 1)
-                Sb = FunctionSpace(wall_mesh, 'Lagrange', 1)
-                # wss_func = project(wss, Vb)
-                wss_norm = project(sqrt(inner(wss, wss)), Sb)
-                plot(wss_norm, interactive=True)
+        # Ensure outward pointing normal
+        bmesh.init_cell_orientations(Expression(('x[0]', 'x[1]', 'x[2]')))
+        normals[bmesh.cell_orientations() == 1] *= -1
+
+        N = VectorFunctionSpace(bmesh, 'DG', 0)
+        norm = Function(N)
+        nv = norm.vector()
+
+        for n in (0,1,2):
+            dofmap = N.sub(n).dofmap()
+            for i in xrange(dofmap.global_dimension()):
+                dof_indices = dofmap.cell_dofs(i)
+                assert len(dof_indices) == 1
+                nv[dof_indices[0]] = normals[i, n]
+
+        return norm
+
+    def compute_functionals(self, velocity, pressure, t, step):
+        if self.args.wss == 'all' or (self.args.wss == 'peak' and (step % self.stepsInSecond) == self.peak_time_step):
+            self.tc.start('WSS')
+            begin('WSS')
+            stress = project(-pressure*self.I + 2*sym(grad(velocity)), self.T)
+            stress.set_allow_extrapolation(True)
+            stress_b = interpolate(stress, self.Tb)
+            # self.fileDict['stress']['file'] << stress_b
+            info('Saved stress tensor')
+            info('Computing WSS')
+            wss = dot(stress_b, self.nb) - inner(dot(stress_b, self.nb), self.nb)*self.nb
+            wss_func = project(wss, self.Vb)
+            wss_norm = project(sqrt_ufl(inner(wss, wss)), self.Sb)
+            info('Saving WSS')
+            self.fileDict['wss']['file'] << wss_func
+            self.fileDict['wss_norm']['file'] << wss_norm
+            self.tc.end('WSS')
+            end()
 
         # following was used to test laplace and stress formulation differences
         # dsgml = sqrt(assemble((1./self.mesh_volume)*inner(div(2*sym(grad(velocity))-grad(velocity)), div(2*sym(grad(velocity))-grad(velocity)))*dx))

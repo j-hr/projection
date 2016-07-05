@@ -29,7 +29,7 @@ class Problem(gp.GeneralProblem):
         self.nu = 3.71 * args.nu  # kinematic viscosity
 
         # Import mesh
-        self.compatible_meshes = ['HYK']
+        self.compatible_meshes = ['HYK', 'HYK3', 'HYK10']
         if args.mesh not in self.compatible_meshes:
             exit('Bad mesh, should be some from %s' % str(self.compatible_meshes))
         self.mesh, self.facet_function = super(Problem, self).loadMesh(args.mesh)
@@ -231,8 +231,8 @@ class Problem(gp.GeneralProblem):
     def save_vel(self, is_tent, field, t):
         super(Problem, self).save_vel(is_tent, field, t)
 
-    def compute_functionals(self, velocity, pressure, t):
-        super(Problem, self).compute_functionals(velocity, pressure, t)
+    def compute_functionals(self, velocity, pressure, t, step):
+        super(Problem, self).compute_functionals(velocity, pressure, t, step)
         out = 0
         for obj in self.outflows:
             outflow = assemble(inner(velocity, self.normal)*obj['measure'])

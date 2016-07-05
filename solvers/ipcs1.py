@@ -525,7 +525,7 @@ class Solver(gs.GeneralSolver):
 
             # compute functionals (e. g. forces)
             problem.compute_functionals(u_cor,
-                                        p_mod if self.useRotationScheme else (pQ if self.bc == 'lagrange' else p_), t)
+                                        p_mod if self.useRotationScheme else (pQ if self.bc == 'lagrange' else p_), t, step)
 
             # Move to next time step
             self.tc.start('next')
