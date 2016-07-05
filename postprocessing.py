@@ -67,4 +67,29 @@ def create_scripts(metadata):
             out_file.write(line)
         template.close()
         out_file.close()
-
+    if metadata['hasWSS']:
+        template = open('../paraview_scripts/template_WSS.py', 'r')
+        out_file = open('show_WSS.py', 'w')
+        for line in template:
+            fac = 1.0
+            if 'factor' in metadata:
+                fac = 0.001/metadata['factor']
+            line = line.replace('$FACTOR$', str(fac))
+            line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'wss.xdmf')
+            line = line.replace('$VECTORNAME1$', metadata['name']+'wss')
+            out_file.write(line)
+        template.close()
+        out_file.close()
+        # WSS norm
+        template = open('../paraview_scripts/template_WSSnorm.py', 'r')
+        out_file = open('show_WSSnorm.py', 'w')
+        for line in template:
+            fac = 1.0
+            if 'factor' in metadata:
+                fac = 0.001/metadata['factor']
+            line = line.replace('$FACTOR$', str(fac))
+            line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'wss_norm.xdmf')
+            line = line.replace('$VECTORNAME1$', metadata['name']+'wss_norm')
+            out_file.write(line)
+        template.close()
+        out_file.close()

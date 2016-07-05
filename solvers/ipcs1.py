@@ -73,7 +73,7 @@ class Solver(gs.GeneralSolver):
         parser.add_argument('--pp', help='pressure Krylov solver precision', type=int, default=10)
         parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
                             choices=['outflow', 'nullspace', 'nullspace_s', 'lagrange'], default='outflow')
-        parser.add_argument('--precV', help='Preconditioner for tentative velocity solver', type=str, default='ilu')
+        parser.add_argument('--precV', help='Preconditioner for tentative velocity solver', type=str, default='sor')
         parser.add_argument('--precP', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu'],
                             default='hypre_amg')
         parser.add_argument('-r', help='Use rotation scheme', action='store_true')
@@ -457,21 +457,21 @@ class Solver(gs.GeneralSolver):
                     foo.assign(pQ + p0)
                 else:
                     foo.assign(p_+p0)
-                problem.averaging_pressure(foo)
                 if save_this_step and not onlyVel:
+                    problem.averaging_pressure(foo)
                     problem.save_pressure(True, foo)
             else:
                 if self.bc == 'lagrange':
                     fa.assign(pQ, p_QL.sub(0))
-                    problem.averaging_pressure(pQ)
                     if save_this_step and not onlyVel:
+                        problem.averaging_pressure(pQ)
                         problem.save_pressure(False, pQ)
                 else:
                     # we do not want to change p=0 on outflow, it conflicts with do-nothing conditions
                     foo = Function(self.Q)
                     foo.assign(p_)
-                    problem.averaging_pressure(foo)
                     if save_this_step and not onlyVel:
+                        problem.averaging_pressure(foo)
                         problem.save_pressure(False, foo)
             end()
 
@@ -518,8 +518,8 @@ class Solver(gs.GeneralSolver):
                 except RuntimeError as inst:
                     problem.report_fail(t)
                     return 1
-                problem.averaging_pressure(p_mod)
                 if save_this_step and not onlyVel:
+                    problem.averaging_pressure(p_mod)
                     problem.save_pressure(False, p_mod)
                 end()
 

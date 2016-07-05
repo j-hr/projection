@@ -28,7 +28,7 @@ PETScOptions.set('ksp_view')  # shows info about used PETSc Solver and precondit
     # PETScOptions.set('log_summary')
 if args.solver == 'direct':
     PETScOptions.set('mat_mumps_icntl_4', 2)  # 1-3 gives lots of information for mumps direct solvers
-    PETScOptions.set('mat_mumps_icntl_1', 0.001)    # TODO Try this, max 1E-6
+    PETScOptions.set('mat_mumps_cntl_1', 0.0001)    # TODO Try this, max 1E-6
 
 # Paralell run initialization
 comm = mpi_comm_world()
