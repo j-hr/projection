@@ -2,7 +2,7 @@
 from paraview.simple import *
 #### disable automatic camera reset on 'Show'
 paraview.simple._DisableFirstRenderCameraReset()
-servermanager.LoadState("/mnt/WINC/Ubuntu_C/diplomka/projection/empty_state_velocity.pvsm")
+servermanager.LoadState("/mnt/WINC/Ubuntu_C/diplomka/_projection/empty_state_velocity.pvsm")
 
 # set active view
 SetActiveView(None)

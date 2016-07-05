@@ -5,7 +5,7 @@ from dolfin import Function, assemble, interpolate, Expression, project, norm, e
     FunctionSpace, VectorFunctionSpace
 from dolfin.cpp.common import mpi_comm_world, toc, MPI, info, begin, end
 from dolfin.cpp.io import XDMFFile, HDF5File
-from dolfin.cpp.mesh import Mesh, MeshFunction, SubMesh, BoundaryMesh
+from dolfin.cpp.mesh import Mesh, MeshFunction, SubMesh, BoundaryMesh, Cell
 from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl, Identity, FacetNormal, dot
 from math import sqrt, pi, cos
 import numpy as np
@@ -84,6 +84,7 @@ class GeneralProblem(object):
         self.I = None
         self.Tb = None
         self.wall_mesh = None
+        self.wall_mesh_oriented = None
         self.Vb = None
         self.Sb = None
         self.nb = None
@@ -219,6 +220,7 @@ class GeneralProblem(object):
         parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.0)
         parser.add_argument('--ldsg', help='save laplace(u) - div(2sym(grad(u))) difference', action='store_true')
         parser.add_argument('--wss', help='compute wall shear stress', choices=['none', 'all', 'peak'], default='none')
+        # NT to use wss -S must be at least only_vel (doSave must be True for wss work properly)
 
     @staticmethod
     def loadMesh(mesh):
@@ -256,15 +258,18 @@ class GeneralProblem(object):
             self.T = TensorFunctionSpace(self.mesh, 'Lagrange', 1)
             info('Generating boundary mesh')
             self.wall_mesh = BoundaryMesh(self.mesh, 'exterior')
+            self.wall_mesh_oriented = BoundaryMesh(self.mesh, 'exterior', order=False)
             info('  Boundary mesh geometric dim: %d' % self.wall_mesh.geometry().dim())
             info('  Boundary mesh topologic dim: %d' % self.wall_mesh.topology().dim())
             self.Tb = TensorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
             self.Vb = VectorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
             self.Sb = FunctionSpace(self.wall_mesh, 'DG', 1)
             info('Generating normal to boundary')
-            self.nb = self.get_facet_normal(self.wall_mesh)
+            # self.nb = self.get_facet_normal(self.wall_mesh)
+            normal_expr = self.NormalExpression(self.wall_mesh_oriented)
+            Sn = VectorFunctionSpace(self.wall_mesh, 'DG', 0)
+            self.nb = project(normal_expr, Sn)
             self.tc.end('WSSinit')
-
 
     def initialize_xdmf_files(self):
         info('  Initializing output files.')
@@ -284,7 +289,7 @@ class GeneralProblem(object):
                 self.fileDict.update(self.fileDictTentPDiff)
         if self.args.ldsg:
             self.fileDict.update(self.fileDictLDSG)
-        if self.args.wss:
+        if self.args.wss != 'none':
             self.fileDict.update(self.fileDictWSS)
         # create files
         for key, value in self.fileDict.iteritems():
@@ -407,7 +412,7 @@ class GeneralProblem(object):
             else:
                 self.save_this_step = False
 
-    # following is hack taken from
+    # following is hack taken from    IMP DOES NOT WORK IN PARALLEL
     # https://bitbucket.org/fenics-project/dolfin/issues/53/dirichlet-boundary-conditions-of-the-form
     @staticmethod
     def get_facet_normal(bmesh):
@@ -436,6 +441,26 @@ class GeneralProblem(object):
                 nv[dof_indices[0]] = normals[i, n]
 
         return norm
+
+    # this might replace previous hack for use in parallel
+    class NormalExpression(Expression):
+        def __init__(self, mesh):
+            self.mesh = mesh
+            self.gdim = mesh.geometry().dim()
+
+        def eval_cell(self, values, x, ufc_cell):
+            cell = Cell(self.mesh, ufc_cell.index)
+            v=cell.get_vertex_coordinates().reshape((-1, self.gdim))
+            vec1 = v[1] - v[0]   # create vectors by substracting coordinates of vertices
+            vec2 = v[2] - v[0]
+            n = np.cross(vec1, vec2)
+            n /= np.linalg.norm(n)
+            values[0] = n[0]
+            values[1] = n[1]
+            values[2] = n[2]
+
+        def value_shape(self):
+            return (3,)
 
     def compute_functionals(self, velocity, pressure, t, step):
         if self.args.wss == 'all' or (self.args.wss == 'peak' and (step % self.stepsInSecond) == self.peak_time_step):
