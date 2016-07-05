@@ -365,7 +365,6 @@ class Solver(gs.GeneralSolver):
         t = dt
         step = 1
         while t < (ttime + dt/2.0):
-            info("t = %f" % t)
             self.problem.update_time(t, step)
             if self.MPI_rank == 0:
                 problem.write_status_file(t)

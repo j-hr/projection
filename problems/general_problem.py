@@ -88,7 +88,7 @@ class GeneralProblem(object):
         self.Vb = None
         self.Sb = None
         self.nb = None
-        self.peak_time_step = None
+        self.peak_time_steps = None
 
         # dictionaries for output files
         self.fileDict = {'u': {'name': 'velocity'},
@@ -251,8 +251,11 @@ class GeneralProblem(object):
         if self.args.wss != 'none':
             # NT implemented in general_problem, but sensible only in womersley_cylinder and real
             # but everything about wss is ommited as long one does not use --wss '...'
-            self.peak_time_step = int(round(0.188/self.metadata['dt']))
-            info('Peak time step at every %dth step in %d steps'%(self.peak_time_step, self.stepsInSecond))
+            # NT manualy written here:
+            chosen_steps = [0.1, 0.125, 0.15, 0.188, 0.2]
+            self.peak_time_steps = [int(round(chosen / self.metadata['dt'])) for chosen in chosen_steps]
+            for ch in self.peak_time_steps:
+                info('Chosen WSS time steps at every %dth step in %d steps' % (ch, self.stepsInSecond))
             self.tc.start('WSSinit')
             self.I = Identity(self.mesh.geometry().dim())
             self.T = TensorFunctionSpace(self.mesh, 'Lagrange', 1)
@@ -396,6 +399,7 @@ class GeneralProblem(object):
         pass
 
     def update_time(self, actual_time, step_number):
+        info('t = %f, step %d' % (actual_time, step_number))
         self.actual_time = actual_time
         self.step_number = step_number
         self.time_list.append(self.actual_time)
@@ -463,9 +467,9 @@ class GeneralProblem(object):
             return (3,)
 
     def compute_functionals(self, velocity, pressure, t, step):
-        if self.args.wss == 'all' or (self.args.wss == 'peak' and (step % self.stepsInSecond) == self.peak_time_step):
+        if self.args.wss == 'all' or (self.args.wss == 'peak' and (step % self.stepsInSecond) in self.peak_time_steps):
             self.tc.start('WSS')
-            begin('WSS')
+            begin('WSS (%dth step)' % step)
             stress = project(-pressure*self.I + 2*sym(grad(velocity)), self.T)
             stress.set_allow_extrapolation(True)
             stress_b = interpolate(stress, self.Tb)
