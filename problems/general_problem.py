@@ -252,7 +252,7 @@ class GeneralProblem(object):
 
         if self.args.ST == 'min' or self.args.wss != 'none':
             # NT manualy written here:
-            chosen_steps = [0.1, 0.125, 0.15, 0.188, 0.2]
+            chosen_steps = [0.1, 0.125, 0.15, 0.175, 0.186, 0.187, 0.188, 0.189, 0.190, 0.2]
             self.peak_time_steps = [int(round(chosen / self.metadata['dt'])) for chosen in chosen_steps]
             for ch in self.peak_time_steps:
                 info('Chosen WSS time steps at every %dth step in %d steps' % (ch, self.stepsInSecond))
@@ -429,38 +429,11 @@ class GeneralProblem(object):
             if self.save_this_step:
                 info('Chose to save this step: (%f, %d)' % (actual_time, step_number))
 
-    # following is hack taken from    IMP DOES NOT WORK IN PARALLEL
-    # https://bitbucket.org/fenics-project/dolfin/issues/53/dirichlet-boundary-conditions-of-the-form
-    @staticmethod
-    def get_facet_normal(bmesh):
-        '''Manually calculate FacetNormal function for 2D boundary mesh in 3D space'''
-        vertices = bmesh.coordinates()
-        cells = bmesh.cells()   # gives list of cells, each cell is list of three vector indices
-
-        vec1 = vertices[cells[:, 1]] - vertices[cells[:, 0]]   # create vectors by substracting coordinates of vertices
-        vec2 = vertices[cells[:, 2]] - vertices[cells[:, 0]]
-        normals = np.cross(vec1, vec2)
-        normals /= np.sqrt((normals**2).sum(axis=1))[:, np.newaxis]   # normalize
-
-        # Ensure outward pointing normal
-        bmesh.init_cell_orientations(Expression(('x[0]', 'x[1]', 'x[2]')))
-        normals[bmesh.cell_orientations() == 1] *= -1
-
-        N = VectorFunctionSpace(bmesh, 'DG', 0)
-        norm = Function(N)
-        nv = norm.vector()
-
-        for n in (0,1,2):
-            dofmap = N.sub(n).dofmap()
-            for i in xrange(dofmap.global_dimension()):
-                dof_indices = dofmap.cell_dofs(i)
-                assert len(dof_indices) == 1
-                nv[dof_indices[0]] = normals[i, n]
-
-        return norm
-
-    # this might replace previous hack for use in parallel
+    # this generates vector expression of normal on boundary mesh
+    # for right orientation use BoundaryMesh(..., order=False)
     class NormalExpression(Expression):
+        """ This generates vector Expression of normal on boundary mesh.
+        For right outward orientation use BoundaryMesh(mesh, 'exterior', order=False)  """
         def __init__(self, mesh):
             self.mesh = mesh
             self.gdim = mesh.geometry().dim()
