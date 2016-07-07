@@ -1,7 +1,9 @@
 #!/bin/bash
 #PBS -q qfree
-#PBS -l select=4:ncpus=24:mpiprocs=24,walltime=12:00
+#PBS -l select=4:ncpus=24:mpiprocs=24,walltime=12:00:00
 #PBS -A OPEN-7-33
+#PBS -o TEST1SOR.out
+#PBS -e TEST1SOR.out
 
 # see https://docs.it4i.cz/salomon/resource-allocation-and-job-execution
 # qfree - max 12h  (for free, low priority, may wait befor start)
@@ -9,11 +11,11 @@
 # qlong - max 144h (charge your account)
 
 # go to working directory on the /scratch/ disc space
-cd /scratch/work/user/hron/WORK/projection
+cd /scratch/work/user/hrncirja/projection
 
 # use our own fenics module from /home/hron
 module use /home/hron/pkg/Modules
 module add fenics/1.7.0dev
 
 # run the computation by mpirun
-mpirun --display-map --map-by core --bind-to core python main.py real ipcs1 HYK 2 0.001 -S only_vel --savespace 10 --onset 0.5 --stab 0.5 --prv1 12 --pav1 4 --precV sor --bcv LAP -n TEST2SOR
+mpirun --display-map --map-by core --bind-to core python main.py real ipcs1 HYK 0.002 0.001 -S only_vel --ST min --wss peak --onset 0.5 --stab 0.5 --prv1 12 --pav1 4 --precV sor --bcv LAP -n TEST1SOR | tee TEST1SOR.temp

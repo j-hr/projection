@@ -250,12 +250,12 @@ class GeneralProblem(object):
         self.stepsInSecond = int(round(1.0 / self.metadata['dt']))
         info('stepsInSecond = %d' % self.stepsInSecond)
 
-        if self.args.ST == 'min' or self.args.wss != 'none':
+        if self.args.ST == 'min' or self.args.wss == 'peak':
             # NT manualy written here:
             chosen_steps = [0.1, 0.125, 0.15, 0.175, 0.186, 0.187, 0.188, 0.189, 0.190, 0.2]
             self.peak_time_steps = [int(round(chosen / self.metadata['dt'])) for chosen in chosen_steps]
             for ch in self.peak_time_steps:
-                info('Chosen WSS time steps at every %dth step in %d steps' % (ch, self.stepsInSecond))
+                info('Chosen peak time steps at every %dth step in %d steps' % (ch, self.stepsInSecond))
 
         if self.args.wss != 'none':
             # NT implemented in general_problem, but sensible only in womersley_cylinder and real
@@ -270,7 +270,7 @@ class GeneralProblem(object):
             info('  Boundary mesh topologic dim: %d' % self.wall_mesh.topology().dim())
             self.Tb = TensorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
             self.Vb = VectorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
-            self.Sb = FunctionSpace(self.wall_mesh, 'DG', 1)
+            self.Sb = FunctionSpace(self.wall_mesh, 'DG', 0)
             info('Generating normal to boundary')
             # self.nb = self.get_facet_normal(self.wall_mesh)
             normal_expr = self.NormalExpression(self.wall_mesh_oriented)
@@ -453,7 +453,7 @@ class GeneralProblem(object):
             return (3,)
 
     def compute_functionals(self, velocity, pressure, t, step):
-        if step >= self.stepsInSecond and (self.args.wss == 'all' or (self.args.wss == 'peak' and (step % self.stepsInSecond) in self.peak_time_steps)):
+        if self.args.wss == 'all' or (step >= self.stepsInSecond and self.args.wss == 'peak' and ((step % self.stepsInSecond) in self.peak_time_steps)):
             self.tc.start('WSS')
             begin('WSS (%dth step)' % step)
             stress = project(-pressure*self.I + 2*sym(grad(velocity)), self.T)
