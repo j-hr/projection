@@ -1,9 +1,9 @@
 #!/bin/bash
 #PBS -q qfree
-#PBS -l select=4:ncpus=24:mpiprocs=24,walltime=12:00:00
+#PBS -l select=1:ncpus=24:mpiprocs=24,walltime=12:00:00
 #PBS -A OPEN-7-33
-#PBS -o TEST1SOR.out
-#PBS -e TEST1SOR.out
+#PBS -o TEST1SORo.out
+#PBS -e TEST1SORe.out
 
 # see https://docs.it4i.cz/salomon/resource-allocation-and-job-execution
 # qfree - max 12h  (for free, low priority, may wait befor start)
