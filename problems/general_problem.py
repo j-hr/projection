@@ -7,7 +7,7 @@ from dolfin.cpp.common import mpi_comm_world, toc, MPI, info, begin, end
 from dolfin.cpp.io import XDMFFile, HDF5File
 from dolfin.cpp.mesh import Mesh, MeshFunction, SubMesh, BoundaryMesh, Cell
 from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl, Identity, FacetNormal, dot
-from math import sqrt, pi, cos
+from math import sqrt, pi, cos, modf
 import numpy as np
 
 class GeneralProblem(object):
@@ -212,10 +212,12 @@ class GeneralProblem(object):
         parser.add_argument('-e', '--error', help='Error control mode', choices=['doEC', 'noEC', 'test'], default='doEC')
         parser.add_argument('-S', '--save', help='Save solution mode', choices=['doSave', 'noSave', 'diff', 'only_vel'],
                             default='noSave')
-        parser.add_argument('--savespace', help='save only n-th step in first cycle', type=int, default=1)
         #   doSave: create .xdmf files with velocity, pressure, divergence
         #   diff: save also difference vel-sol
         #   noSave: do not create .xdmf files with velocity, pressure, divergence
+        parser.add_argument('--savespace', help='save only n-th step in first cycle', type=int, default=1)
+        parser.add_argument('--ST', help='save only n-th step in first cycle', choices=['min', 'peak', 'no_restriction'], default='no_restriction')
+        # stronger than --savespace, to be used instead of it
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=1.0)
         parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.0)
         parser.add_argument('--ldsg', help='save laplace(u) - div(2sym(grad(u))) difference', action='store_true')
@@ -248,14 +250,16 @@ class GeneralProblem(object):
         self.stepsInSecond = int(round(1.0 / self.metadata['dt']))
         info('stepsInSecond = %d' % self.stepsInSecond)
 
-        if self.args.wss != 'none':
-            # NT implemented in general_problem, but sensible only in womersley_cylinder and real
-            # but everything about wss is ommited as long one does not use --wss '...'
+        if self.args.ST == 'min' or self.args.wss != 'none':
             # NT manualy written here:
             chosen_steps = [0.1, 0.125, 0.15, 0.188, 0.2]
             self.peak_time_steps = [int(round(chosen / self.metadata['dt'])) for chosen in chosen_steps]
             for ch in self.peak_time_steps:
                 info('Chosen WSS time steps at every %dth step in %d steps' % (ch, self.stepsInSecond))
+
+        if self.args.wss != 'none':
+            # NT implemented in general_problem, but sensible only in womersley_cylinder and real
+            # but everything about wss is ommited as long one does not use --wss '...'
             self.tc.start('WSSinit')
             self.I = Identity(self.mesh.geometry().dim())
             self.T = TensorFunctionSpace(self.mesh, 'Lagrange', 1)
@@ -409,12 +413,21 @@ class GeneralProblem(object):
             self.onset_factor = (1. - cos(pi * actual_time / self.onset))*0.5
         info('Onset factor: %f' % self.onset_factor)
 
+        # Manage saving choices for this step
         # save only n-th step in first second
         if self.doSave:
-            if self.save_nth == 1 or actual_time > (1. - self.metadata['dt']/2.) or self.step_number % self.save_nth == 0:
+            dec, i = modf(actual_time)
+            i = int(i)
+            if self.args.ST == 'min':
+                self.save_this_step = (i >= 1 and (step_number % self.stepsInSecond in self.peak_time_steps))
+            elif self.args.ST == 'peak':
+                self.save_this_step = (i >= 1 and 0.1 < dec < 0.20001)
+            elif self.save_nth == 1 or i >= 1 or self.step_number % self.save_nth == 0:
                 self.save_this_step = True
             else:
                 self.save_this_step = False
+            if self.save_this_step:
+                info('Chose to save this step: (%f, %d)' % (actual_time, step_number))
 
     # following is hack taken from    IMP DOES NOT WORK IN PARALLEL
     # https://bitbucket.org/fenics-project/dolfin/issues/53/dirichlet-boundary-conditions-of-the-form
@@ -467,7 +480,7 @@ class GeneralProblem(object):
             return (3,)
 
     def compute_functionals(self, velocity, pressure, t, step):
-        if self.args.wss == 'all' or (self.args.wss == 'peak' and (step % self.stepsInSecond) in self.peak_time_steps):
+        if step >= self.stepsInSecond and (self.args.wss == 'all' or (self.args.wss == 'peak' and (step % self.stepsInSecond) in self.peak_time_steps)):
             self.tc.start('WSS')
             begin('WSS (%dth step)' % step)
             stress = project(-pressure*self.I + 2*sym(grad(velocity)), self.T)

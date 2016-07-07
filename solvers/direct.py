@@ -161,6 +161,7 @@ class Solver(gs.GeneralSolver):
         # prm['newton_solver']['maximum_iterations'] = 45
         # prm['newton_solver']['relaxation_parameter'] = 1.0
         prm['newton_solver']['linear_solver'] = 'mumps'
+        # prm['newton_solver']['lu_solver']['same_nonzero_pattern'] = True
 
         info(NS_solver.parameters, True)
 

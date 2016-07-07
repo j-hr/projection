@@ -5,7 +5,7 @@ from dolfin import *
 # names = ['cyl_c1', 'cyl_d1', 'cyl_c2', 'cyl_d2', 'cyl_c3', 'cyl_c3o', 'cyl_d3', 'cyl_e3']
 # names = ['cyl_c1', 'cyl_c2', 'cyl_c3', 'cyl_c3o', 'cyl_c3o_netgen', 'cyl15_3']
 # names = ['HYK']
-names = ['HYK_120']
+names = ['cyl_c2']
 
 doPlotQualityHistogram = False
 doComputeVolume = False
