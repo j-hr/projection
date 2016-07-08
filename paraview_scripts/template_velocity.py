@@ -5,7 +5,7 @@ paraview.simple._DisableFirstRenderCameraReset()
 
 # LoadState must be here even though I later overwrite all settings manually
 # without it it won't split windows properly
-servermanager.LoadState("paraview_scripts/empty_state_velocity.pvsm")
+servermanager.LoadState("$DIR$/empty.pvsm")
 
 # set active view
 SetActiveView(None)
@@ -43,7 +43,7 @@ for (path, vector_name, rv) in load:
     velocityDisplay = Show(velocity, rv)
     # trace defaults for the display properties.
     velocityDisplay.ColorArrayName = [None, '']
-    # velocityDisplay.ScalarOpacityUnitDistance = 0.6518746966631972  # nevím, co dělá
+    # velocityDisplay.ScalarOpacityUnitDistance = 0.6518746966631972
     velocityDisplay.Opacity = 0.2
 
     # reset view to fit data

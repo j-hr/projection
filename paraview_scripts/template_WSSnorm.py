@@ -5,7 +5,7 @@ paraview.simple._DisableFirstRenderCameraReset()
 
 # LoadState must be here even though I later overwrite all settings manually
 # without it it won't split windows properly
-servermanager.LoadState("paraview_scripts/empty_state_velocity.pvsm")
+servermanager.LoadState("$DIR$/empty.pvsm")
 
 # set active view
 SetActiveView(None)

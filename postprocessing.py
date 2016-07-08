@@ -4,6 +4,7 @@ __author__ = 'jh'
 
 import os
 import re
+import shutil
 
 regex = re.compile('"f_')
 
@@ -39,6 +40,7 @@ def rewrite_xdmf_files(metadata):
 
 def create_scripts(metadata):
     abspath = os.path.abspath(os.curdir)
+    shutil.copy2('../paraview_scripts/empty.pvsm', 'empty.pvsm')
     if metadata['hasTentativeV']:
         template = open('../paraview_scripts/template_compare_vel_tent_cor.py', 'r')
         out_file = open('compare_vel_tent.py', 'w')
@@ -47,6 +49,7 @@ def create_scripts(metadata):
             if 'factor' in metadata:
                 fac = 0.001/metadata['factor']
             line = line.replace('$FACTOR$', str(fac))
+            line = line.replace('$DIR$', metadata['dir'])
             line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'velocity_tent.xdmf')
             line = line.replace('$FILENAME2$', metadata['dir']+'/'+metadata['filename_base']+'velocity.xdmf')
             line = line.replace('$VECTORNAME1$', metadata['name']+'velocity_tent')
@@ -61,6 +64,7 @@ def create_scripts(metadata):
             fac = 1.0
             if 'factor' in metadata:
                 fac = 0.001/metadata['factor']
+            line = line.replace('$DIR$', metadata['dir'])
             line = line.replace('$FACTOR$', str(fac))
             line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'velocity.xdmf')
             line = line.replace('$VECTORNAME1$', metadata['name']+'velocity')
@@ -75,6 +79,7 @@ def create_scripts(metadata):
                 fac = 1.0
                 if 'factor' in metadata:
                     fac = 0.001/metadata['factor']
+                line = line.replace('$DIR$', metadata['dir'])
                 line = line.replace('$FACTOR$', str(fac))
                 line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'wss.xdmf')
                 line = line.replace('$VECTORNAME1$', metadata['name']+'wss')
@@ -88,6 +93,7 @@ def create_scripts(metadata):
                 fac = 1.0
                 if 'factor' in metadata:
                     fac = 0.001/metadata['factor']
+                line = line.replace('$DIR$', metadata['dir'])
                 line = line.replace('$FACTOR$', str(fac))
                 line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'wss_norm.xdmf')
                 line = line.replace('$VECTORNAME1$', metadata['name']+'wss_norm')
@@ -102,6 +108,7 @@ def create_scripts(metadata):
                 fac = 1.0
                 if 'factor' in metadata:
                     fac = 0.001/metadata['factor']
+                line = line.replace('$DIR$', metadata['dir'])
                 line = line.replace('$FACTOR$', str(fac))
                 line = line.replace('$FILENAME1$', metadata['dir']+'/'+metadata['filename_base']+'wss_norm.xdmf')
                 line = line.replace('$VECTORNAME1$', metadata['name']+'wss_norm')
