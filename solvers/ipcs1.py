@@ -74,8 +74,8 @@ class Solver(gs.GeneralSolver):
         parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
                             choices=['outflow', 'nullspace', 'nullspace_s', 'lagrange'], default='outflow')
         parser.add_argument('--precV', help='Preconditioner for tentative velocity solver', type=str, default='sor')
-        parser.add_argument('--precP', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu'],
-                            default='hypre_amg')
+        parser.add_argument('--precP', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu', 'sor'],
+                            default='sor')
         parser.add_argument('-r', help='Use rotation scheme', action='store_true')
         parser.add_argument('-B', help='Use no BC in correction step', action='store_true')
         parser.add_argument('--fo', help='Force Neumann outflow boundary for pressure', action='store_true')
