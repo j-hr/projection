@@ -147,8 +147,8 @@ class Solver(gs.GeneralSolver):
                                                           {'type': 'p', 'time': 0.0}])
 
         if doSave:
-            problem.save_vel(False, u0, 0.0)
-            problem.save_vel(True, u0, 0.0)
+            problem.save_vel(False, u0)
+            problem.save_vel(True, u0)
 
         u_ = Function(self.V)         # current tentative velocity
         u_cor = Function(self.V)         # current corrected velocity
@@ -404,7 +404,7 @@ class Solver(gs.GeneralSolver):
                 self.tc.end('solve 1')
                 if save_this_step:
                     self.tc.start('saveVel')
-                    problem.save_vel(True, u_, t)
+                    problem.save_vel(True, u_)
                     self.tc.end('saveVel')
                 if save_this_step and not onlyVel:
                     problem.save_div(True, u_)
@@ -493,7 +493,7 @@ class Solver(gs.GeneralSolver):
                 return 1
             if save_this_step:
                 self.tc.start('saveVel')
-                problem.save_vel(False, u_cor, t)
+                problem.save_vel(False, u_cor)
                 self.tc.end('saveVel')
             if save_this_step and not onlyVel:
                 problem.save_div(False, u_cor)

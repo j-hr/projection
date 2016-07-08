@@ -2,7 +2,10 @@
 from paraview.simple import *
 #### disable automatic camera reset on 'Show'
 paraview.simple._DisableFirstRenderCameraReset()
-servermanager.LoadState("/mnt/WINC/Ubuntu_C/diplomka/_projection/empty_state_velocity.pvsm")
+
+# LoadState must be here even though I later overwrite all settings manually
+# without it it won't split windows properly
+servermanager.LoadState("paraview_scripts/empty_state_velocity.pvsm")
 
 # set active view
 SetActiveView(None)

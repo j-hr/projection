@@ -308,7 +308,7 @@ class GeneralProblem(object):
     def save_div(self, is_tent, field):
         self.tc.start('div')
         self.divFunction.assign(project(div(field), self.divSpace))
-        self.fileDict['d2' if is_tent else 'd']['file'] << self.divFunction
+        self.fileDict['d2' if is_tent else 'd']['file'] << (self.divFunction, self.actual_time)
         self.tc.end('div')
 
     def compute_div(self, is_tent, velocity):
@@ -321,19 +321,19 @@ class GeneralProblem(object):
         self.tc.end('divNorm')
 
     # method for saving velocity (ensuring, that it will be one time line in ParaView)
-    def save_vel(self, is_tent, field, t):
+    def save_vel(self, is_tent, field):
         self.vFunction.assign(field)
-        self.fileDict['u2' if is_tent else 'u']['file'] << self.vFunction
+        self.fileDict['u2' if is_tent else 'u']['file'] << (self.vFunction, self.actual_time)
         if self.doSaveDiff:
             self.vFunction.assign((1.0 / self.vel_normalization_factor[0]) * (field - self.solution))
-            self.fileDict['u2D' if is_tent else 'uD']['file'] << self.vFunction
+            self.fileDict['u2D' if is_tent else 'uD']['file'] << (self.vFunction, self.actual_time)
         if self.args.ldsg:
             # info(div(2.*sym(grad(field))-grad(field)).ufl_shape)
             form = div(2.*sym(grad(field))-grad(field))
             self.pFunction.assign(project(sqrt_ufl(inner(form, form)), self.pSpace))
-            self.fileDict['ldsg2' if is_tent else 'ldsg']['file'] << self.pFunction
+            self.fileDict['ldsg2' if is_tent else 'ldsg']['file'] << (self.pFunction, self.actual_time)
             # self.vFunction.assign(project(div(2.*sym(grad(field))-grad(field)), self.vSpace))
-            # self.fileDict['ldsg2' if is_tent else 'ldsg']['file'] << self.vFunction
+            # self.fileDict['ldsg2' if is_tent else 'ldsg']['file'] << (self.vFunction, self.actual_time)
 
     def compute_err(self, is_tent, velocity, t):
         if self.doErrControl and self.has_analytic_solution:
@@ -380,10 +380,10 @@ class GeneralProblem(object):
 
     def save_pressure(self, is_tent, pressure):
         self.tc.start('saveP')
-        self.fileDict['p2' if is_tent else 'p']['file'] << pressure
+        self.fileDict['p2' if is_tent else 'p']['file'] << (pressure, self.actual_time)
         # pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)  # NT normalisation factor defined only in Womersley
         # self.pgFunction.assign(pg)
-        # self.fileDict['pg2' if is_tent else 'pg'][0] << self.pgFunction
+        # self.fileDict['pg2' if is_tent else 'pg'][0] << (self.pgFunction, self.actual_time
         self.tc.end('saveP')
 
     def get_boundary_conditions(self, use_pressure_BC, v_space, p_space):
@@ -459,15 +459,15 @@ class GeneralProblem(object):
             stress = project(-pressure*self.I + 2*sym(grad(velocity)), self.T)
             stress.set_allow_extrapolation(True)
             stress_b = interpolate(stress, self.Tb)
-            # self.fileDict['stress']['file'] << stress_b
+            # self.fileDict['stress']['file'] << (stress_b, self.actual_time)
             info('Saved stress tensor')
             info('Computing WSS')
             wss = dot(stress_b, self.nb) - inner(dot(stress_b, self.nb), self.nb)*self.nb
             wss_func = project(wss, self.Vb)
             wss_norm = project(sqrt_ufl(inner(wss, wss)), self.Sb)
             info('Saving WSS')
-            self.fileDict['wss']['file'] << wss_func
-            self.fileDict['wss_norm']['file'] << wss_norm
+            self.fileDict['wss']['file'] << (wss_func, self.actual_time)
+            self.fileDict['wss_norm']['file'] << (wss_norm, self.actual_time)
             self.tc.end('WSS')
             end()
 

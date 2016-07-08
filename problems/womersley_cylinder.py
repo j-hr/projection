@@ -52,7 +52,6 @@ class Problem(gp.GeneralProblem):
         print("Mesh norm max: ", self.mesh.hmax())
         print("Mesh norm min: ", self.mesh.hmin())
 
-        self.actual_time = None
         self.sol_p = None
         self.last_analytic_pressure_norm = None
         self.v_in = None

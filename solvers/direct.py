@@ -132,7 +132,7 @@ class Solver(gs.GeneralSolver):
         [u0, p0] = self.problem.get_initial_conditions([{'type': 'v', 'time': 0.0}, {'type': 'p', 'time': 0.0}])
 
         if doSave:
-            problem.save_vel(False, u0, 0.0)
+            problem.save_vel(False, u0)
 
         # boundary conditions
         bcu, bcp = problem.get_boundary_conditions(self.bc == 'outflow', self.W.sub(0), self.W.sub(1))
@@ -199,7 +199,7 @@ class Solver(gs.GeneralSolver):
 
             if save_this_step:
                 self.tc.start('saveVel')
-                problem.save_vel(False, velSp, t)
+                problem.save_vel(False, velSp)
                 self.tc.end('saveVel')
             if save_this_step and not onlyVel:
                 problem.save_div(False, u)

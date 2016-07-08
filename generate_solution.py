@@ -6,6 +6,8 @@ import results
 import problem as prb
 import argparse
 
+# IMP this utility file is outdated, as i did not need when creating modular code. It may or may not work.
+
 # Import gmsh mesh
 parser = argparse.ArgumentParser()
 parser.add_argument('mesh', help='Mesh name')

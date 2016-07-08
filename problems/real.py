@@ -93,7 +93,6 @@ class Problem(gp.GeneralProblem):
             self.listDict.update({'outflow' + n:
                                       {'list': [], 'name': 'outflow rate ' + n, 'abrev': 'OUT' + n, 'slist': []}})
         self.can_force_outflow = True
-        self.actual_time = None
 
     def get_outflow_measures(self):
         return self.outflow_measures
@@ -228,8 +227,8 @@ class Problem(gp.GeneralProblem):
     def save_pressure(self, is_tent, pressure):
         super(Problem, self).save_pressure(is_tent, pressure)
 
-    def save_vel(self, is_tent, field, t):
-        super(Problem, self).save_vel(is_tent, field, t)
+    def save_vel(self, is_tent, field):
+        super(Problem, self).save_vel(is_tent, field)
 
     def compute_functionals(self, velocity, pressure, t, step):
         super(Problem, self).compute_functionals(velocity, pressure, t, step)
