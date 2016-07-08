@@ -7,6 +7,8 @@ from dolfin.cpp.mesh import Mesh, MeshFunction, FacetFunction, vertices, facets
 from math import sqrt
 from ufl import Measure, FacetNormal, inner, ds, div, transpose, grad, dx, sym
 import csv
+
+import time_control
 from problems import general_problem as gp
 
 
@@ -28,6 +30,7 @@ class Problem(gp.GeneralProblem):
 
         self.nu = 3.71 * args.nu  # kinematic viscosity
 
+        self.tc.start('mesh')
         # Import mesh
         self.compatible_meshes = ['HYK', 'HYK3', 'HYK10']
         if args.mesh not in self.compatible_meshes:
@@ -59,6 +62,7 @@ class Problem(gp.GeneralProblem):
                     obj[row[0]] = [float(f) for f in row[1:]]
         self.interfaces.append(obj)
         f_ini.close()
+        self.tc.end('mesh')
 
         self.outflow_area = 0
         self.inflows = []
