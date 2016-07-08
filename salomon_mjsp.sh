@@ -15,11 +15,11 @@
 grep -v "#" $1 | while read name nodes cores queue walltime run
 do
     echo \#!/bin/bash > $name
-    echo \#PBS -q qfree
-    echo \#PBS -l select=$nodes:ncpus=$cores:mpiprocs=$cores,walltime=$walltime:00:00
-    echo \#PBS -A OPEN-7-33
-    echo \#PBS -o ${name}o.out
-    echo \#PBS -e ${name}o.out
+    echo \#PBS -q qfree >> $name
+    echo \#PBS -l select=$nodes:ncpus=$cores:mpiprocs=$cores,walltime=$walltime:00:00 >> $name
+    echo \#PBS -A OPEN-7-33 >> $name
+    echo \#PBS -o ${name}o.out >> $name
+    echo \#PBS -e ${name}o.out >> $name
     echo echo $name >> $name
     echo cd /scratch/work/user/hron/WORK/projection >> $name
     echo module use /home/hron/pkg/Modules >> $name
