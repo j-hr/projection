@@ -32,28 +32,28 @@ for (path, vector_name, rv) in load:
     # set active view
     SetActiveView(rv)
     # create a new 'XDMF Reader'
-    velocity = XDMFReader(FileNames=[path])
-    velocity.PointArrayStatus = [vector_name]
+    wss = XDMFReader(FileNames=[path])
+    wss.PointArrayStatus = [vector_name]
     # get animation scene
     animationScene1 = GetAnimationScene()
     # update animation scene based on data timesteps
     animationScene1.UpdateAnimationUsingDataTimeSteps()
     animationScene1.GoToNext()
     # show data in view
-    velocityDisplay = Show(velocity, rv)
+    wssDisplay = Show(wss, rv)
     # trace defaults for the display properties.
-    velocityDisplay.ColorArrayName = [None, '']
-    # velocityDisplay.ScalarOpacityUnitDistance = 0.6518746966631972  # nevím, co dělá
-    velocityDisplay.Opacity = 0.1
+    wssDisplay.ColorArrayName = [None, '']
+    # wssDisplay.ScalarOpacityUnitDistance = 0.6518746966631972  # nevím, co dělá
+    wssDisplay.Opacity = 0.1
 
     # reset view to fit data
     rv.ResetCamera()
     
     # turn off scalar coloring
-    ColorBy(velocityDisplay, None)
+    ColorBy(wssDisplay, None)
 
     # create a new 'Glyph'
-    glyph1 = Glyph(Input=velocity, GlyphType='2D Glyph')
+    glyph1 = Glyph(Input=wss, GlyphType='2D Glyph')
     glyph1.GlyphType.GlyphType = 'Arrow'
     glyph1.GlyphType.Center = [0.5, 0.0, 0.0]
     glyph1.Scalars = [None, '']

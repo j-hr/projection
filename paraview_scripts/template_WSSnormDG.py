@@ -33,7 +33,7 @@ for (path, vector_name, rv) in load:
     SetActiveView(rv)
     # create a new 'XDMF Reader'
     wss = XDMFReader(FileNames=[path])
-    wss.PointArrayStatus = [vector_name]
+    wss.CellArrayStatus = [vector_name]
     # get animation scene
     animationScene1 = GetAnimationScene()
     # update animation scene based on data timesteps
@@ -50,7 +50,7 @@ for (path, vector_name, rv) in load:
     rv.ResetCamera()
     
     # scalar coloring
-    ColorBy(wssDisplay, ('POINTS', vector_name))
+    ColorBy(wssDisplay, ('CELLS', vector_name))
 
     # get color transfer function/color map and define old 'Cool to Warm' scheme
     color = GetColorTransferFunction(vector_name)

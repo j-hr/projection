@@ -1,12 +1,13 @@
 from __future__ import print_function
 import os, sys, traceback
 import csv, cPickle
-from dolfin import Function, assemble, interpolate, Expression, project, norm, errornorm, TensorFunctionSpace, plot, \
+from dolfin import Function, TestFunction, assemble, interpolate, Expression, project, norm, errornorm, TensorFunctionSpace, plot, \
     FunctionSpace, VectorFunctionSpace
 from dolfin.cpp.common import mpi_comm_world, toc, MPI, info, begin, end
 from dolfin.cpp.io import XDMFFile, HDF5File
 from dolfin.cpp.mesh import Mesh, MeshFunction, SubMesh, BoundaryMesh, Cell
-from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl, Identity, FacetNormal, dot
+from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl, Identity, FacetNormal, dot, \
+    FacetArea, ds, as_vector
 from math import sqrt, pi, cos, modf
 import numpy as np
 
@@ -80,13 +81,17 @@ class GeneralProblem(object):
 
         # for WSS generation
         metadata['hasWSS'] = (args.wss != 'none')
+        metadata['WSSmethod'] = self.args.wss_method
+        self.nu = 0.0
         self.T = None
-        self.I = None
         self.Tb = None
         self.wall_mesh = None
         self.wall_mesh_oriented = None
         self.Vb = None
         self.Sb = None
+        self.VDG = None
+        self.R = None
+        self.SDG = None
         self.nb = None
         self.peak_time_steps = None
 
@@ -107,8 +112,8 @@ class GeneralProblem(object):
         #                          'pg2D': {'name': 'pressure_grad_tent_diff'}}
         self.fileDictLDSG = {'ldsg': {'name': 'ldsg'},
                              'ldsg2': {'name': 'ldsg_tent'}}
-        self.fileDictWSS = {#'stress': {'name': 'stress'},
-             'wss': {'name': 'wss'}, 'wss_norm': {'name': 'wss_norm'}, }
+        self.fileDictWSS = {'wss': {'name': 'wss'}, }
+        self.fileDictWSSnorm = {'wss_norm': {'name': 'wss_norm'}, }
 
         # lists of functionals and other scalar output data
         self.time_list = []  # list of times, when error is  measured (used in report)
@@ -221,6 +226,8 @@ class GeneralProblem(object):
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=1.0)
         parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.0)
         parser.add_argument('--ldsg', help='save laplace(u) - div(2sym(grad(u))) difference', action='store_true')
+        parser.add_argument('--wss_method', help='compute wall shear stress', choices=['expression', 'integral'], default='integral')
+        # expression does not work for too many processors (24 procs for 'HYK' is OK, 48 is too much)
         parser.add_argument('--wss', help='compute wall shear stress', choices=['none', 'all', 'peak'], default='none')
         # NT to use wss -S must be at least only_vel (doSave must be True for wss work properly)
 
@@ -261,7 +268,6 @@ class GeneralProblem(object):
             # NT implemented in general_problem, but sensible only in womersley_cylinder and real
             # but everything about wss is ommited as long one does not use --wss '...'
             self.tc.start('WSSinit')
-            self.I = Identity(self.mesh.geometry().dim())
             self.T = TensorFunctionSpace(self.mesh, 'Lagrange', 1)
             info('Generating boundary mesh')
             self.wall_mesh = BoundaryMesh(self.mesh, 'exterior')
@@ -270,12 +276,15 @@ class GeneralProblem(object):
             info('  Boundary mesh topologic dim: %d' % self.wall_mesh.topology().dim())
             self.Tb = TensorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
             self.Vb = VectorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
+            self.VDG = VectorFunctionSpace(self.mesh, 'DG', 0)
+            self.SDG = FunctionSpace(self.mesh, 'DG', 0)
+            self.R = VectorFunctionSpace(self.mesh, 'R', 0)
             self.Sb = FunctionSpace(self.wall_mesh, 'DG', 0)
             info('Generating normal to boundary')
             # self.nb = self.get_facet_normal(self.wall_mesh)
             normal_expr = self.NormalExpression(self.wall_mesh_oriented)
-            Sn = VectorFunctionSpace(self.wall_mesh, 'DG', 0)
-            self.nb = project(normal_expr, Sn)
+            Vn = VectorFunctionSpace(self.wall_mesh, 'DG', 0)
+            self.nb = project(normal_expr, Vn)
             self.tc.end('WSSinit')
 
     def initialize_xdmf_files(self):
@@ -297,7 +306,9 @@ class GeneralProblem(object):
         if self.args.ldsg:
             self.fileDict.update(self.fileDictLDSG)
         if self.args.wss != 'none':
-            self.fileDict.update(self.fileDictWSS)
+            self.fileDict.update(self.fileDictWSSnorm)
+            if self.args.wss_method == 'expression':
+                self.fileDict.update(self.fileDictWSS)
         # create files
         for key, value in self.fileDict.iteritems():
             value['file'] = XDMFFile(mpi_comm_world(), self.str_dir_name + "/" + self.problem_code + '_' +
@@ -431,6 +442,8 @@ class GeneralProblem(object):
 
     # this generates vector expression of normal on boundary mesh
     # for right orientation use BoundaryMesh(..., order=False)
+    # IMP this does not work if some parallel process have no boundary mesh, because that is not implemented in FEniCS
+    #
     class NormalExpression(Expression):
         """ This generates vector Expression of normal on boundary mesh.
         For right outward orientation use BoundaryMesh(mesh, 'exterior', order=False)  """
@@ -456,18 +469,38 @@ class GeneralProblem(object):
         if self.args.wss == 'all' or (step >= self.stepsInSecond and self.args.wss == 'peak' and ((step % self.stepsInSecond) in self.peak_time_steps)):
             self.tc.start('WSS')
             begin('WSS (%dth step)' % step)
-            stress = project(-pressure*self.I + 2*sym(grad(velocity)), self.T)
-            stress.set_allow_extrapolation(True)
-            stress_b = interpolate(stress, self.Tb)
-            # self.fileDict['stress']['file'] << (stress_b, self.actual_time)
-            info('Saved stress tensor')
-            info('Computing WSS')
-            wss = dot(stress_b, self.nb) - inner(dot(stress_b, self.nb), self.nb)*self.nb
-            wss_func = project(wss, self.Vb)
-            wss_norm = project(sqrt_ufl(inner(wss, wss)), self.Sb)
-            info('Saving WSS')
-            self.fileDict['wss']['file'] << (wss_func, self.actual_time)
-            self.fileDict['wss_norm']['file'] << (wss_norm, self.actual_time)
+            if self.args.wss_method == 'expression':
+                stress = project(self.nu*2*sym(grad(velocity)), self.T)
+                stress.set_allow_extrapolation(True)
+                stress_b = interpolate(stress, self.Tb)
+                # self.fileDict['stress']['file'] << (stress_b, self.actual_time)
+                info('Saved stress tensor')
+                info('Computing WSS')
+                wss = dot(stress_b, self.nb) - inner(dot(stress_b, self.nb), self.nb)*self.nb
+                wss_func = project(wss, self.Vb)
+                wss_norm = project(sqrt_ufl(inner(wss, wss)), self.Sb)
+                info('Saving WSS')
+                self.fileDict['wss']['file'] << (wss_func, self.actual_time)
+                self.fileDict['wss_norm']['file'] << (wss_norm, self.actual_time)
+            if self.args.wss_method == 'integral':
+                wss_norm = Function(self.SDG)
+                mS = TestFunction(self.SDG)
+                scaling = 1/FacetArea(self.mesh)
+                stress = self.nu*2*sym(grad(velocity))
+                wss = dot(stress, self.normal) - inner(dot(stress, self.normal), self.normal)*self.normal
+                wss_norm_form = scaling*mS*sqrt_ufl(inner(wss, wss))*ds
+                assemble(wss_norm_form, tensor=wss_norm.vector())
+                self.fileDict['wss_norm']['file'] << (wss_norm, self.actual_time)
+
+                # NT this works, but it is hard to display in Paraview (DG, 1) vector space across exterior facet centers
+                # wss_vector = []
+                # for i in range(3):
+                #     wss_component = Function(self.SDG)
+                #     wss_vector_form = scaling*wss[i]*mS*ds
+                #     assemble(wss_vector_form, tensor=wss_component.vector())
+                #     wss_vector.append(wss_component)
+                # wss_func = project(as_vector(wss_vector), self.VDG)
+                # self.fileDict['wss']['file'] << (wss_func, self.actual_time)
             self.tc.end('WSS')
             end()
 
