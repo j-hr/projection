@@ -268,23 +268,25 @@ class GeneralProblem(object):
             # NT implemented in general_problem, but sensible only in womersley_cylinder and real
             # but everything about wss is ommited as long one does not use --wss '...'
             self.tc.start('WSSinit')
-            self.T = TensorFunctionSpace(self.mesh, 'Lagrange', 1)
-            info('Generating boundary mesh')
-            self.wall_mesh = BoundaryMesh(self.mesh, 'exterior')
-            self.wall_mesh_oriented = BoundaryMesh(self.mesh, 'exterior', order=False)
-            info('  Boundary mesh geometric dim: %d' % self.wall_mesh.geometry().dim())
-            info('  Boundary mesh topologic dim: %d' % self.wall_mesh.topology().dim())
-            self.Tb = TensorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
-            self.Vb = VectorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
-            self.VDG = VectorFunctionSpace(self.mesh, 'DG', 0)
-            self.SDG = FunctionSpace(self.mesh, 'DG', 0)
-            self.R = VectorFunctionSpace(self.mesh, 'R', 0)
-            self.Sb = FunctionSpace(self.wall_mesh, 'DG', 0)
-            info('Generating normal to boundary')
-            # self.nb = self.get_facet_normal(self.wall_mesh)
-            normal_expr = self.NormalExpression(self.wall_mesh_oriented)
-            Vn = VectorFunctionSpace(self.wall_mesh, 'DG', 0)
-            self.nb = project(normal_expr, Vn)
+            if self.args.wss_method == 'expression':
+                self.T = TensorFunctionSpace(self.mesh, 'Lagrange', 1)
+                info('Generating boundary mesh')
+                self.wall_mesh = BoundaryMesh(self.mesh, 'exterior')
+                self.wall_mesh_oriented = BoundaryMesh(self.mesh, 'exterior', order=False)
+                info('  Boundary mesh geometric dim: %d' % self.wall_mesh.geometry().dim())
+                info('  Boundary mesh topologic dim: %d' % self.wall_mesh.topology().dim())
+                self.Tb = TensorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
+                self.Vb = VectorFunctionSpace(self.wall_mesh, 'Lagrange', 1)
+                info('Generating normal to boundary')
+                # self.nb = self.get_facet_normal(self.wall_mesh)
+                normal_expr = self.NormalExpression(self.wall_mesh_oriented)
+                Vn = VectorFunctionSpace(self.wall_mesh, 'DG', 0)
+                self.nb = project(normal_expr, Vn)
+                self.Sb = FunctionSpace(self.wall_mesh, 'DG', 0)
+
+            if self.args.wss_method == 'integral':
+                self.SDG = FunctionSpace(self.mesh, 'DG', 0)
+
             self.tc.end('WSSinit')
 
     def initialize_xdmf_files(self):
