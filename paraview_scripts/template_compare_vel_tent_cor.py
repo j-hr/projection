@@ -71,7 +71,9 @@ for (path, vector_name, rv) in load:
     ColorBy(velocityDisplay, None)
 
     # create a new 'Glyph'
-    glyph1 = Glyph(Input=velocity, GlyphType='Arrow')
+    glyph1 = Glyph(Input=velocity, GlyphType='2D Glyph')
+    glyph1.GlyphType.GlyphType = 'Arrow'
+    glyph1.GlyphType.Center = [0.5, 0.0, 0.0]
     glyph1.Scalars = [None, '']
     glyph1.Vectors = ['POINTS', vector_name]
     glyph1.ScaleFactor = $FACTOR$
