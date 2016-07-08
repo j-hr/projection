@@ -19,7 +19,7 @@ do
     echo \#PBS -l select=$nodes:ncpus=$cores:mpiprocs=$cores,walltime=$walltime:00:00 >> $name
     echo \#PBS -A OPEN-7-33 >> $name
     echo \#PBS -o ${name}o.out >> $name
-    echo \#PBS -e ${name}o.out >> $name
+    echo \#PBS -e ${name}e.out >> $name
     echo echo $name >> $name
     echo cd /scratch/work/user/hron/WORK/projection >> $name
     echo module use /home/hron/pkg/Modules >> $name
