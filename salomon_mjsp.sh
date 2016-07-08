@@ -15,7 +15,7 @@
 grep -v "#" $1 | while read name nodes cores queue walltime run
 do
     echo \#!/bin/bash > $name
-    echo \#PBS -q qfree >> $name
+    echo \#PBS -q $queue >> $name
     echo \#PBS -l select=$nodes:ncpus=$cores:mpiprocs=$cores,walltime=$walltime:00:00 >> $name
     echo \#PBS -A OPEN-7-33 >> $name
     echo \#PBS -o ${name}o.out >> $name
