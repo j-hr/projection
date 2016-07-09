@@ -54,11 +54,8 @@ class Solver(gs.GeneralSolver):
         self.B = args.B
         self.use_ema = args.ema
         self.cbcDelta = args.cbcDelta
-        self.prec_v = args.precV
-        self.prec_p = args.precP
         self.precision_rel_v_tent = args.prv1
         self.precision_abs_v_tent = args.pav1
-        self.precision_p = args.pp
 
     def __str__(self):
         return 'ipcs1 - incremental pressure correction scheme with nonlinearity treated by Adam-Bashword + ' \
@@ -70,12 +67,15 @@ class Solver(gs.GeneralSolver):
         parser.add_argument('-s', '--solvers', help='Solvers', choices=['direct', 'krylov'], default='krylov')
         parser.add_argument('--prv1', help='relative tentative velocity Krylov solver precision', type=int, default=6)
         parser.add_argument('--pav1', help='absolute tentative velocity Krylov solver precision', type=int, default=10)
-        parser.add_argument('--pp', help='pressure Krylov solver precision', type=int, default=10)
+        parser.add_argument('--pap', help='pressure Krylov solver absolute precision', type=int, default=6)
+        parser.add_argument('--prp', help='pressure Krylov solver relative precision', type=int, default=10)
         parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
                             choices=['outflow', 'nullspace', 'nullspace_s', 'lagrange'], default='outflow')
         parser.add_argument('--precV', help='Preconditioner for tentative velocity solver', type=str, default='sor')
-        parser.add_argument('--precP', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu', 'sor'],
+        parser.add_argument('--precP', help='Preconditioner for 2nd step solver (Poisson)', choices=['hypre_amg', 'ilu', 'sor'],
                             default='sor')
+        parser.add_argument('--solP', help='2nd step solver (Poisson)', choices=['cg', 'gmres', 'richardson', 'tfqmr'],
+                            default='cg')
         parser.add_argument('-r', help='Use rotation scheme', action='store_true')
         parser.add_argument('-B', help='Use no BC in correction step', action='store_true')
         parser.add_argument('--fo', help='Force Neumann outflow boundary for pressure', action='store_true')
@@ -299,19 +299,19 @@ class Solver(gs.GeneralSolver):
             if self.useRotationScheme:
                 self.solver_rot = LUSolver('umfpack')
         else:
-            # NT not needed, chosen not to use hypre_parasails
+            # not needed, chosen not to use hypre_parasails:
             # if self.prec_v == 'hypre_parasails':  # in FEniCS 1.6.0 inaccessible using KrylovSolver class
             #     self.solver_vel_tent = PETScKrylovSolver('gmres')   # PETSc4py object
             #     self.solver_vel_tent.ksp().getPC().setType('hypre')
             #     PETScOptions.set('pc_hypre_type', 'parasails')
             #     # this is global setting, but preconditioners for pressure solvers are set by their constructors
             # else:
-            self.solver_vel_tent = KrylovSolver('gmres', self.prec_v)   # nonsymetric > gmres
-            # IMP cannot use 'ilu' in parallel (choose different default option)
-            self.solver_vel_cor = KrylovSolver('cg', 'hypre_amg')   # nonsymetric > gmres
-            self.solver_p = KrylovSolver('cg', self.prec_p)          # symmetric > CG
+            self.solver_vel_tent = KrylovSolver('gmres', self.args.precV)   # nonsymetric > gmres
+            # cannot use 'ilu' in parallel
+            self.solver_vel_cor = KrylovSolver('cg', 'hypre_amg')
+            self.solver_p = KrylovSolver(self.args.solP, self.args.precP)    # almost (up to BC) symmetric > CG
             if self.useRotationScheme:
-                self.solver_rot = KrylovSolver('cg', self.prec_p)
+                self.solver_rot = KrylovSolver('cg', 'hypre_amg')
 
         solver_options = {'monitor_convergence': True, 'maximum_iterations': 1000, 'nonzero_initial_guess': True}
         # 'nonzero_initial_guess': True   with  solver.solbe(A, u, b) means that
@@ -332,10 +332,10 @@ class Solver(gs.GeneralSolver):
         self.solver_vel_tent.parameters['absolute_tolerance'] = 10 ** (-self.precision_abs_v_tent)
         self.solver_vel_cor.parameters['relative_tolerance'] = 10E-12
         self.solver_vel_cor.parameters['absolute_tolerance'] = 10E-4
-        self.solver_p.parameters['relative_tolerance'] = 10**(-self.precision_p)
-        self.solver_p.parameters['absolute_tolerance'] = 10E-10
+        self.solver_p.parameters['relative_tolerance'] = 10**(-self.args.prp)
+        self.solver_p.parameters['absolute_tolerance'] = 10**(-self.args.pap)
         if self.useRotationScheme:
-            self.solver_rot.parameters['relative_tolerance'] = 10**(-self.precision_p)
+            self.solver_rot.parameters['relative_tolerance'] = 10E-10
             self.solver_rot.parameters['absolute_tolerance'] = 10E-10
 
         if self.solvers == 'krylov':
