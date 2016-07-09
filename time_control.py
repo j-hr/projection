@@ -80,12 +80,9 @@ class TimeControl:
         report_data = [str_name, total_time]
         for key in sorted_by_name:
             value = self.watches[key]
-            report_header.append(value[2])
-            report_header.append('part '+value[2])
-            report_data.append(value[0])
-            report_data.append(value[0]/total_time)
-        report_header.append('part unmeasured')
-        report_data.append((total_time-sum)/total_time)
+            if value[4]:
+                report_header.append(value[2])
+                report_data.append(value[0])
         if report_file is not None:
             writer = csv.writer(report_file, delimiter=';', quotechar='|', quoting=csv.QUOTE_NONE)
             writer.writerow(report_header)
