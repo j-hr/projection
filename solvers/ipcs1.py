@@ -343,7 +343,7 @@ class Solver(gs.GeneralSolver):
             self.solver_rot.parameters['absolute_tolerance'] = 10E-10
 
         if self.args.Vrestart > 0:
-            self.solver_vel_tent.parameters['gmres']['restart'] = self.args.Prestart
+            self.solver_vel_tent.parameters['gmres']['restart'] = self.args.Vrestart
 
         if self.args.solP == 'gmres' and self.args.Prestart > 0:
             self.solver_p.parameters['gmres']['restart'] = self.args.Prestart
