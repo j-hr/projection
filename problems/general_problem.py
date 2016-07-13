@@ -115,6 +115,7 @@ class GeneralProblem(object):
                              'ldsg2': {'name': 'ldsg_tent'}}
         self.fileDictWSS = {'wss': {'name': 'wss'}, }
         self.fileDictWSSnorm = {'wss_norm': {'name': 'wss_norm'}, }
+        self.fileDictDebugRot = {'grad_cor': {'name': 'grad_cor'}, }
 
         # lists of functionals and other scalar output data
         self.time_list = []  # list of times, when error is  measured (used in report)
@@ -231,6 +232,7 @@ class GeneralProblem(object):
         # expression does not work for too many processors (24 procs for 'HYK' is OK, 48 is too much)
         parser.add_argument('--wss', help='compute wall shear stress', choices=['none', 'all', 'peak'], default='none')
         # NT to use wss -S must be at least only_vel (doSave must be True for wss work properly)
+        parser.add_argument('--debug_rot', help='save more information about rotation correction', action='store_true')
 
     @staticmethod
     def loadMesh(mesh):
@@ -312,6 +314,8 @@ class GeneralProblem(object):
             self.fileDict.update(self.fileDictWSSnorm)
             if self.args.wss_method == 'expression':
                 self.fileDict.update(self.fileDictWSS)
+        if self.args.debug_rot:
+            self.fileDict.update(self.fileDictDebugRot)
         # create files
         for key, value in self.fileDict.iteritems():
             value['file'] = XDMFFile(mpi_comm_world(), self.str_dir_name + "/" + self.problem_code + '_' +

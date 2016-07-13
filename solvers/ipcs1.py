@@ -1,11 +1,12 @@
 from __future__ import print_function
 from dolfin import Function, VectorFunctionSpace, FunctionSpace, assemble, Expression, CellSize, DOLFIN_EPS, parameters, \
-    plot
+    plot, project, DirichletBC
 from dolfin.cpp.common import info, begin, end
 from dolfin.cpp.function import FunctionAssigner
 from dolfin.cpp.la import LUSolver, KrylovSolver, as_backend_type, VectorSpaceBasis, Vector, PETScKrylovSolver, \
     PETScOptions
 from dolfin.functions import TrialFunction, TestFunction, Constant, FacetNormal
+from sympy.core.compatibility import u_decode
 from ufl import dot, dx, grad, system, div, inner, sym, Identity, transpose, nabla_grad, sqrt, min_value
 
 import general_solver as gs
@@ -86,6 +87,7 @@ class Solver(gs.GeneralSolver):
         parser.add_argument('--ema', help='Use EMA conserving scheme for convection term', action='store_true')
         # described in Charnyi, Heister, Olshanskii, Rebholz:
         # "On conservation laws of Navier-Stokes Galerkin discretizations" (2016)
+        # it seems that it does not work with projection methods (probably because of dropping div u = 0 constraint)
         parser.add_argument('--cs', help='Use consistent SUPG stabilisation.', action='store_true')
         parser.add_argument('--cbcDelta', help='Use simpler cbcflow parameter for SUPG', action='store_true')
 
@@ -364,6 +366,11 @@ class Solver(gs.GeneralSolver):
         ttime = self.metadata['time']
         t = dt
         step = 1
+
+        # debug function
+        if problem.args.debug_rot:
+            plot_cor_v = Function(self.V)
+
         while t < (ttime + dt/2.0):
             self.problem.update_time(t, step)
             if self.MPI_rank == 0:
@@ -521,6 +528,11 @@ class Solver(gs.GeneralSolver):
                     problem.averaging_pressure(p_mod)
                     problem.save_pressure(False, p_mod)
                 end()
+
+                if problem.args.debug_rot:
+                    # save applied pressure correction (expressed as a term added to RHS of next tentative vel. step)
+                    plot_cor_v.assign(project(k*grad(nu*div(u_)), self.V))
+                    problem.fileDict['grad_cor']['file'] << (plot_cor_v, t)
 
             # compute functionals (e. g. forces)
             problem.compute_functionals(u_cor,

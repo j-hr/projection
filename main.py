@@ -43,6 +43,11 @@ else:
 
 info('Running on %d processor(s).' % MPI.size(comm))
 
+if MPI.size(comm) > 1 and args.problem == 'womersley_cylinder':
+    info('Womersley cylinder problem is not runnable in parallel due to method of construction of analytic solution,'
+         ' which is used to describe boundary conditions.')
+    exit()
+
 exec('from solvers.%s import Solver' % args.solver)
 exec('from problems.%s import Problem' % args.problem)
 
