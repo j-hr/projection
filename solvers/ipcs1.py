@@ -77,6 +77,8 @@ class Solver(gs.GeneralSolver):
                             default='sor')
         parser.add_argument('--solP', help='2nd step solver (Poisson)', choices=['cg', 'gmres', 'richardson', 'tfqmr'],
                             default='cg')
+        parser.add_argument('--Prestart', help='2nd step solver GMRES restart', type=int, default=-1)
+        parser.add_argument('--Vrestart', help='1st step solver GMRES restart', type=int, default=-1)
         parser.add_argument('-r', help='Use rotation scheme', action='store_true')
         parser.add_argument('-B', help='Use no BC in correction step', action='store_true')
         parser.add_argument('--fo', help='Force Neumann outflow boundary for pressure', action='store_true')
@@ -339,6 +341,12 @@ class Solver(gs.GeneralSolver):
         if self.useRotationScheme:
             self.solver_rot.parameters['relative_tolerance'] = 10E-10
             self.solver_rot.parameters['absolute_tolerance'] = 10E-10
+
+        if self.args.Vrestart > 0:
+            self.solver_vel_tent.parameters['gmres']['restart'] = self.args.Prestart
+
+        if self.args.solP == 'gmres' and self.args.Prestart > 0:
+            self.solver_p.parameters['gmres']['restart'] = self.args.Prestart
 
         if self.solvers == 'krylov':
             for solver in [self.solver_vel_tent, self.solver_vel_cor, self.solver_p, self.solver_rot] if \
