@@ -92,6 +92,7 @@ class Solver(gs.GeneralSolver):
         # it seems that it does not work with projection methods (probably because of dropping div u = 0 constraint)
         parser.add_argument('--cs', help='Use consistent SUPG stabilisation.', action='store_true')
         parser.add_argument('--cbcDelta', help='Use simpler cbcflow parameter for SUPG', action='store_true')
+        parser.add_argument('--cod', help='Use corrected parameter for SUPG', action='store_true')
 
     def solve(self, problem):
         self.problem = problem
@@ -176,11 +177,13 @@ class Solver(gs.GeneralSolver):
         # CBC delta:
         if self.cbcDelta:
             delta = Constant(self.stabCoef)*h/(sqrt(inner(u_ext, u_ext))+h)
+        elif self.args.cod:
+            delta = Constant(self.stabCoef)*k*h**2/(2*nu*k + k*h*sqrt(inner(u_ext, u_ext))+h**2)
         else:
             delta = Constant(self.stabCoef)*h**2/(2*nu*k + k*h*inner(u_ext, u_ext)+h**2)
 
         if self.use_full_SUPG:
-            v1 = v + delta*0.5*k*dot(grad(v), u_ext)
+            v1 = v + delta*0.5*dot(grad(v), u_ext)
             parameters['form_compiler']['quadrature_degree'] = 6
         else:
             v1 = v

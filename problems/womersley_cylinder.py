@@ -179,7 +179,7 @@ class Problem(gp.GeneralProblem):
 
         # Update boundary condition
         self.tc.start('updateBC')
-        self.v_in.assign(self.solution)
+        self.v_in.assign(self.onset_factor * self.solution)
         self.tc.end('updateBC')
 
         # construct analytic pressure (used for computing pressure and force errors)
