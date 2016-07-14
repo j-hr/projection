@@ -151,9 +151,10 @@ class Solver(gs.GeneralSolver):
                                                           {'type': 'v', 'time': 0.0},
                                                           {'type': 'p', 'time': 0.0}])
 
-        if doSave:
-            problem.save_vel(False, u0)
-            problem.save_vel(True, u0)
+        # save used initial conditions
+        # if doSave:
+        #     problem.save_vel(False, u0)
+        #     problem.save_vel(True, u0)
 
         u_ = Function(self.V)         # current tentative velocity
         u_cor = Function(self.V)         # current corrected velocity

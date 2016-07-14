@@ -262,7 +262,8 @@ class GeneralProblem(object):
 
         if self.args.ST == 'min' or self.args.wss == 'peak':
             # NT manualy written here:
-            chosen_steps = [0.1, 0.125, 0.15, 0.175, 0.186, 0.187, 0.188, 0.189, 0.190, 0.2]
+            # 0.166... is peak for real problem, 0.188 is peak for womersley profile
+            chosen_steps = [0.1, 0.125, 0.15, 0.16, 0.165, 0.166,  0.167, 0.17, 0.188, 0.2]
             self.peak_time_steps = [int(round(chosen / self.metadata['dt'])) for chosen in chosen_steps]
             for ch in self.peak_time_steps:
                 info('Chosen peak time steps at every %dth step in %d steps' % (ch, self.stepsInSecond))
