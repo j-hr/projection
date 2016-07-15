@@ -21,7 +21,7 @@ do
     echo \#PBS -o ${name}o.out >> $name
     echo \#PBS -e ${name}e.out >> $name
     echo echo $name >> $name
-    echo cd /scratch/work/user/hron/WORK/projection >> $name
+    echo cd /scratch/work/user/hrncirja/projection >> $name
     echo module use /home/hron/pkg/Modules >> $name
     echo module add fenics/1.7.0dev >> $name
     echo echo Running on host \`hostname\` >> $name
