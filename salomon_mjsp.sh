@@ -29,6 +29,7 @@ do
     echo echo Time is \`date\` >> $name
     echo mpirun --display-map --map-by core --bind-to core python $run -n $name | tee ${name}.temp >> $name
     echo echo Time is \`date\` >> $name
+    echo rm ${name}.temp >> $name
     qsub $name
     sleep 2
 done
