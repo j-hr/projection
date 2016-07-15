@@ -11,10 +11,6 @@ from ufl import dot, dx, grad, system, div, inner, sym, Identity, transpose, nab
 
 import general_solver as gs
 
-# QQ split rotation, lagrange scheme?
-# (implement as this Solver subclass? Can class be subclass of class with same name?)
-# in current state almost no code is saved by subclassing this, one must rewrite whole solve()
-
 
 class Solver(gs.GeneralSolver):
     def __init__(self, args, tc, metadata):
@@ -71,7 +67,7 @@ class Solver(gs.GeneralSolver):
         parser.add_argument('--pap', help='pressure Krylov solver absolute precision', type=int, default=6)
         parser.add_argument('--prp', help='pressure Krylov solver relative precision', type=int, default=10)
         parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
-                            choices=['outflow', 'nullspace', 'nullspace_s', 'lagrange'], default='outflow')
+                            choices=['outflow', 'nullspace'], default='outflow')
         parser.add_argument('--precV', help='Preconditioner for tentative velocity GMRES solver', type=str, default='sor')
         parser.add_argument('--precVC', help='Preconditioner for corrected velocity CG solver', type=str, default='hypre_amg')
         parser.add_argument('--precP', help='Preconditioner for 2nd step solver (Poisson)', choices=['hypre_amg', 'ilu', 'sor'],
@@ -128,21 +124,14 @@ class Solver(gs.GeneralSolver):
         self.Q = FunctionSpace(mesh, "Lagrange", 1)  # pressure
         self.PS = FunctionSpace(mesh, "Lagrange", 2)  # partial solution (must be same order as V)
         self.D = FunctionSpace(mesh, "Lagrange", 1)   # velocity divergence space
-        if self.bc == 'lagrange':
-            L = FunctionSpace(mesh, "R", 0)
-            QL = self.Q*L
 
         problem.initialize(self.V, self.Q, self.PS, self.D)
 
         # Define trial and test functions
         u = TrialFunction(self.V)
         v = TestFunction(self.V)
-        if self.bc == 'lagrange':
-            (pQL, rQL) = TrialFunction(QL)
-            (qQL, lQL) = TestFunction(QL)
-        else:
-            p = TrialFunction(self.Q)
-            q = TestFunction(self.Q)
+        p = TrialFunction(self.Q)
+        q = TestFunction(self.Q)
 
         n = FacetNormal(mesh)
         I = Identity(u.geometric_dimension())
@@ -159,11 +148,7 @@ class Solver(gs.GeneralSolver):
 
         u_ = Function(self.V)         # current tentative velocity
         u_cor = Function(self.V)         # current corrected velocity
-        if self.bc == 'lagrange':
-            p_QL = Function(QL)    # current pressure or pressure help function from rotation scheme
-            pQ = Function(self.Q)     # auxiliary function for conversion between QL.sub(0) and Q
-        else:
-            p_ = Function(self.Q)         # current pressure or pressure help function from rotation scheme
+        p_ = Function(self.Q)         # current pressure or pressure help function from rotation scheme
         p_mod = Function(self.Q)      # current modified pressure from rotation scheme
 
         # Define coefficients
@@ -204,28 +189,21 @@ class Solver(gs.GeneralSolver):
             else:
                 form = inner(nu * 2 * sym(grad(fce)), sym(grad(v1))) * dx
                 if self.bcv == 'CDN':
-                    # IMP will work only if p=0 on output, or we must add term
-                    # inner(p0*n, v)*problem.get_outflow_measure_form() to avoid boundary layer
                     return form
                 if self.bcv == 'LAP':
-                    return form - inner(nu*dot(grad(fce).T, n), v1)  * problem.get_outflow_measure_form()
+                    return form - inner(nu*dot(grad(fce).T, n), v1) * problem.get_outflow_measure_form()
                 if self.bcv == 'DDN':
-                    # IMP will work only if p=0 on output, or we must add term
-                    # inner(p0*n, v)*problem.get_outflow_measure_form() to avoid boundary layer
                     return form  # additional term must be added to non-constant part
 
         def pressure_rhs():
-            if self.useLaplace or self.bcv == 'LAP':
-                return inner(p0, div(v1)) * dx - inner(p0*n, v1) * problem.get_outflow_measure_form()
-                # NT term inner(inner(p, n), v) is 0 when p=0 on outflow
-            else:
-                return inner(p0, div(v1)) * dx
+            return inner(p0, div(v1)) * dx - inner(p0*n, v1) * problem.get_outflow_measure_form()
 
         a1_const = (1./k)*inner(u, v1)*dx + diffusion(0.5*u)
         a1_change = nonlinearity(0.5*u)
         if self.bcv == 'DDN':
             # IMP Problem: Does not penalize influx for current step, only for the next one
-            # IMP this can lead to oscilation: DDN correct next step, but then u_ext is OK so in next step DDN is not used, leading to new influx...
+            # IMP this can lead to oscilation:
+            # DDN correct next step, but then u_ext is OK so in next step DDN is not used, leading to new influx...
             # u and u_ext cannot be switched, min_value is nonlinear function
             a1_change += -0.5*min_value(Constant(0.), inner(u_ext, n))*inner(u, v1)*problem.get_outflow_measure_form()
             # IMP works only with uflacs compiler
@@ -245,48 +223,29 @@ class Solver(gs.GeneralSolver):
         need_outflow = Constant(0.0)
         if self.useRotationScheme:
             # Rotation scheme
-            if self.bc == 'lagrange':
-                F2 = inner(grad(pQL), grad(qQL))*dx + (1./k)*qQL*div(u_)*dx + pQL*lQL*dx + qQL*rQL*dx
-            else:
-                F2 = inner(grad(p), grad(q))*dx + (1./k)*q*div(u_)*dx
+            F2 = inner(grad(p), grad(q))*dx + (1./k)*q*div(u_)*dx
         else:
             # Projection, solve to p_
-            if self.bc == 'lagrange':
-                F2 = inner(grad(pQL - p0), grad(qQL))*dx + (1./k)*qQL*div(u_)*dx + pQL*lQL*dx + qQL*rQL*dx
+            if self.forceOutflow and problem.can_force_outflow:
+                info('Forcing outflow.')
+                F2 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
+                for m in problem.get_outflow_measures():
+                    F2 += (1./k)*(1./outflow_area)*need_outflow*q*m
             else:
-                if self.forceOutflow and problem.can_force_outflow:
-                    info('Forcing outflow.')
-                    F2 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
-                    for m in problem.get_outflow_measures():
-                        F2 += (1./k)*(1./outflow_area)*need_outflow*q*m
-                else:
-                    F2 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
+                F2 = inner(grad(p - p0), grad(q))*dx + (1./k)*q*div(u_)*dx
         a2, L2 = system(F2)
 
         # step 3: Finalize, solve to u_
         if self.useRotationScheme:
             # Rotation scheme
-            if self.bc == 'lagrange':
-                F3 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_QL.sub(0)), v)*dx
-            else:
-                F3 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_), v)*dx
+            F3 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_), v)*dx
         else:
-            if self.bc == 'lagrange':
-                F3 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_QL.sub(0) - p0), v)*dx
-            else:
-                F3 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_ - p0), v)*dx
+            F3 = (1./k)*inner(u - u_, v)*dx + inner(grad(p_ - p0), v)*dx
         a3, L3 = system(F3)
 
         if self.useRotationScheme:
             # Rotation scheme: modify pressure
-            if self.bc == 'lagrange':
-                pr = TrialFunction(self.Q)
-                qr = TestFunction(self.Q)
-                F4 = (pr - p0 - p_QL.sub(0) + nu*div(u_))*qr*dx
-            else:
-                F4 = (p - p0 - p_ + nu*div(u_))*q*dx
-            # TODO zkusit, jestli to nebude rychlejsi? nepocitat soustavu, ale p.assign(...), nutno project(div(u),Q) coz je pocitani podobne soustavy
-            # TODO zkusit v project zadat solver_type='lu' >> primy resic by mel byt efektivnejsi
+            F4 = (p - p0 - p_ + nu*div(u_))*q*dx
             a4, L4 = system(F4)
 
         # Assemble matrices
@@ -328,13 +287,12 @@ class Solver(gs.GeneralSolver):
 
         # Get the nullspace if there are no pressure boundary conditions
         foo = Function(self.Q)     # auxiliary vector for setting pressure nullspace
-        if self.bc in ['nullspace', 'nullspace_s']:
+        if self.bc == 'nullspace':
             null_vec = Vector(foo.vector())
             self.Q.dofmap().set(null_vec, 1.0)
             null_vec *= 1.0/null_vec.norm('l2')
             self.null_space = VectorSpaceBasis([null_vec])
-            if self.bc == 'nullspace':
-                as_backend_type(A2).set_nullspace(self.null_space)
+            as_backend_type(A2).set_nullspace(self.null_space)
 
         # apply global options for Krylov solvers
         self.solver_vel_tent.parameters['relative_tolerance'] = 10 ** (-self.precision_rel_v_tent)
@@ -367,9 +325,6 @@ class Solver(gs.GeneralSolver):
 
         self.solver_vel_tent.parameters['preconditioner']['structure'] = 'same_nonzero_pattern'
         # matrix A1 changes every time step, so change of preconditioner must be allowed
-
-        if self.bc == 'lagrange':
-            fa = FunctionAssigner(self.Q, QL.sub(0))
 
         # boundary conditions
         bcu, bcp = problem.get_boundary_conditions(self.bc == 'outflow', self.V, self.Q)
@@ -456,42 +411,29 @@ class Solver(gs.GeneralSolver):
             self.tc.end('rhs')
             self.tc.start('applybcP')
             [bc.apply(A2, b) for bc in bcp]
-            if self.bc in ['nullspace', 'nullspace_s']:
+            if self.bc == 'nullspace':
                 self.null_space.orthogonalize(b)
             self.tc.end('applybcP')
             try:
                 self.tc.start('solve 2')
-                if self.bc == 'lagrange':
-                    self.solver_p.solve(A2, p_QL.vector(), b)
-                else:
-                    self.solver_p.solve(A2, p_.vector(), b)
+                self.solver_p.solve(A2, p_.vector(), b)
                 self.tc.end('solve 2')
             except RuntimeError as inst:
                 problem.report_fail(t)
                 return 1
             if self.useRotationScheme:
                 foo = Function(self.Q)
-                if self.bc == 'lagrange':
-                    fa.assign(pQ, p_QL.sub(0))
-                    foo.assign(pQ + p0)
-                else:
-                    foo.assign(p_+p0)
+                foo.assign(p_+p0)
                 if save_this_step and not onlyVel:
                     problem.averaging_pressure(foo)
                     problem.save_pressure(True, foo)
             else:
-                if self.bc == 'lagrange':
-                    fa.assign(pQ, p_QL.sub(0))
-                    if save_this_step and not onlyVel:
-                        problem.averaging_pressure(pQ)
-                        problem.save_pressure(False, pQ)
-                else:
-                    # we do not want to change p=0 on outflow, it conflicts with do-nothing conditions
-                    foo = Function(self.Q)
-                    foo.assign(p_)
-                    if save_this_step and not onlyVel:
-                        problem.averaging_pressure(foo)
-                        problem.save_pressure(False, foo)
+                # we do not want to change p=0 on outflow, it conflicts with do-nothing conditions
+                foo = Function(self.Q)
+                foo.assign(p_)
+                if save_this_step and not onlyVel:
+                    problem.averaging_pressure(foo)
+                    problem.save_pressure(False, foo)
             end()
 
             begin("Computing corrected velocity")
@@ -518,6 +460,9 @@ class Solver(gs.GeneralSolver):
             if save_this_step and not onlyVel:
                 problem.save_div(False, u_cor)
             end()
+
+            # IMP remove
+            plot(u_cor, interactive=True)
 
             # DDN debug
             # u_ext_in = assemble(inner(u_cor, n)*problem.get_outflow_measure_form())
@@ -548,8 +493,7 @@ class Solver(gs.GeneralSolver):
                     problem.fileDict['grad_cor']['file'] << (plot_cor_v, t)
 
             # compute functionals (e. g. forces)
-            problem.compute_functionals(u_cor,
-                                        p_mod if self.useRotationScheme else (pQ if self.bc == 'lagrange' else p_), t, step)
+            problem.compute_functionals(u_cor, p_mod if self.useRotationScheme else p_, t, step)
 
             # Move to next time step
             self.tc.start('next')
@@ -560,10 +504,7 @@ class Solver(gs.GeneralSolver):
             if self.useRotationScheme:
                 p0.assign(p_mod)
             else:
-                if self.bc == 'lagrange':
-                    p0.assign(pQ)
-                else:
-                    p0.assign(p_)
+                p0.assign(p_)
 
             t = round(t + dt, 6)  # round time step to 0.000001
             step += 1
