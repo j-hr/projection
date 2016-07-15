@@ -461,8 +461,8 @@ class Solver(gs.GeneralSolver):
                 problem.save_div(False, u_cor)
             end()
 
-            # IMP remove
-            plot(u_cor, interactive=True)
+            # debug
+            # plot(u_cor, interactive=True)
 
             # DDN debug
             # u_ext_in = assemble(inner(u_cor, n)*problem.get_outflow_measure_form())
