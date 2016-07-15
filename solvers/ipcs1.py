@@ -72,7 +72,8 @@ class Solver(gs.GeneralSolver):
         parser.add_argument('--prp', help='pressure Krylov solver relative precision', type=int, default=10)
         parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
                             choices=['outflow', 'nullspace', 'nullspace_s', 'lagrange'], default='outflow')
-        parser.add_argument('--precV', help='Preconditioner for tentative velocity solver', type=str, default='sor')
+        parser.add_argument('--precV', help='Preconditioner for tentative velocity GMRES solver', type=str, default='sor')
+        parser.add_argument('--precVC', help='Preconditioner for corrected velocity CG solver', type=str, default='hypre_amg')
         parser.add_argument('--precP', help='Preconditioner for 2nd step solver (Poisson)', choices=['hypre_amg', 'ilu', 'sor'],
                             default='sor')
         parser.add_argument('--solP', help='2nd step solver (Poisson)', choices=['cg', 'gmres', 'richardson', 'tfqmr'],
@@ -316,7 +317,7 @@ class Solver(gs.GeneralSolver):
             # else:
             self.solver_vel_tent = KrylovSolver('gmres', self.args.precV)   # nonsymetric > gmres
             # cannot use 'ilu' in parallel
-            self.solver_vel_cor = KrylovSolver('cg', 'hypre_amg')
+            self.solver_vel_cor = KrylovSolver('cg', self.args.precVC)
             self.solver_p = KrylovSolver(self.args.solP, self.args.precP)    # almost (up to BC) symmetric > CG
             if self.useRotationScheme:
                 self.solver_rot = KrylovSolver('cg', 'hypre_amg')
