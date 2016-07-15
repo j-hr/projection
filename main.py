@@ -106,7 +106,7 @@ r = solver.solve(problem)
 out = {0: 'Solver finished correctly.', 1: 'Solver failed or solution diverged, exception caught.'}
 info(out.get(r, 'UNCAUGHT ERROR IN SOLVE METHOD'))
 
-if rank==0:
+if rank == 0 and problem.doSave:
     info('Post-processing')
     postprocessing.rewrite_xdmf_files(metadata)
     postprocessing.create_scripts(metadata)
