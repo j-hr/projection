@@ -16,75 +16,14 @@ class Solver(gs.GeneralSolver):
     def __init__(self, args, tc, metadata):
         gs.GeneralSolver.__init__(self, args, tc, metadata)
         self.metadata['hasTentativeV'] = False
-
-        self.solver_vel_tent = None
-        self.solver_vel_cor = None
-        self.solver_p = None
-        self.solver_rot = None
-        self.null_space = None
-
-        # input parameters
-        self.bc = args.bc
-        self.forceOutflow = args.fo
-        self.useLaplace = args.laplace
-        self.use_full_SUPG = args.cs
-        self.bcv = 'NOT' if self.useLaplace else args.bcv
-        if self.bcv == 'CDN':
-            info('Using classical do nothing condition (Tn=0).')
-        if self.bcv == 'DDN':
-            info('Using directional do nothing condition (Tn=0.5*negative(u.n)u).')
-        if self.bcv == 'LAP':
-            info('Using laplace neutral condition (grad(u)n=0).')
-        self.stabCoef = args.stab
-        self.stabilize = (args.stab > DOLFIN_EPS)
-        if self.stabilize:
-            if self.use_full_SUPG:
-                info('Used consistent streamline-diffusion stabilization with coef.: %f' % args.stab)
-            else:
-                info('Used non-consistent streamline-diffusion stabilization with coef.: %f' % args.stab)
-        else:
-            info('No stabilization used.')
-        self.solvers = args.solvers
-        self.useRotationScheme = args.r
-        self.metadata['hasTentativeP'] = self.useRotationScheme
-
-        self.B = args.B
-        self.use_ema = args.ema
-        self.cbcDelta = args.cbcDelta
-        self.prec_v = args.precV
-        self.prec_p = args.precP
-        self.precision_rel_v_tent = args.prv1
-        self.precision_abs_v_tent = args.pav1
-        self.precision_p = args.pp
+        self.metadata['hasTentativeP'] = False
 
     def __str__(self):
-        return 'ipcs1 - incremental pressure correction scheme with nonlinearity treated by Adam-Bashword + ' \
-               'Crank-Nicolson and viscosity term treated semi-explicitly (Crank-Nicholson)'
+        return 'Newton method with MUMPS LU solver'
 
     @staticmethod
     def setup_parser_options(parser):
         gs.GeneralSolver.setup_parser_options(parser)
-        parser.add_argument('-s', '--solvers', help='Solvers', choices=['direct', 'krylov'], default='krylov')
-        parser.add_argument('--prv1', help='relative tentative velocity Krylov solver precision', type=int, default=6)
-        parser.add_argument('--pav1', help='absolute tentative velocity Krylov solver precision', type=int, default=10)
-        parser.add_argument('--pp', help='pressure Krylov solver precision', type=int, default=10)
-        parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
-                            choices=['outflow', 'nullspace', 'nullspace_s', 'lagrange'], default='outflow')
-        parser.add_argument('--precV', help='Preconditioner for tentative velocity solver', type=str, default='ilu')
-        parser.add_argument('--precP', help='Preconditioner for pressure solver', choices=['hypre_amg', 'ilu'],
-                            default='hypre_amg')
-        parser.add_argument('-r', help='Use rotation scheme', action='store_true')
-        parser.add_argument('-B', help='Use no BC in correction step', action='store_true')
-        parser.add_argument('--fo', help='Force Neumann outflow boundary for pressure', action='store_true')
-        parser.add_argument('--laplace', help='Use laplace(u) instead of div(symgrad(u))', action='store_true')
-        parser.add_argument('--stab', help='Use stabilization (positive constant)', type=float, default=0.)
-        parser.add_argument('--bcv', help='Oufflow BC for velocity (with stress formulation)',
-                            choices=['CDN', 'DDN', 'LAP'], default='CDN')
-        parser.add_argument('--ema', help='Use EMA conserving scheme for convection term', action='store_true')
-        # described in Charnyi, Heister, Olshanskii, Rebholz:
-        # "On conservation laws of Navier-Stokes Galerkin discretizations" (2016)
-        parser.add_argument('--cs', help='Use consistent SUPG stabilisation.', action='store_true')
-        parser.add_argument('--cbcDelta', help='Use simpler cbcflow parameter for SUPG', action='store_true')
 
     def solve(self, problem):
         self.problem = problem
@@ -135,8 +74,7 @@ class Solver(gs.GeneralSolver):
             problem.save_vel(False, u0)
 
         # boundary conditions
-        bcu, bcp = problem.get_boundary_conditions(self.bc == 'outflow', self.W.sub(0), self.W.sub(1))
-        # NT bcp is not used
+        bcu, bcp = problem.get_boundary_conditions(False, self.W.sub(0), self.W.sub(1))
 
         # Define steady part of the equation
         def T(u):
