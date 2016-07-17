@@ -93,6 +93,7 @@ class GeneralProblem(object):
         self.VDG = None
         self.R = None
         self.SDG = None
+        self.SCG = None
         self.nb = None
         self.peak_time_steps = None
 
@@ -115,6 +116,7 @@ class GeneralProblem(object):
                              'ldsg2': {'name': 'ldsg_tent'}}
         self.fileDictWSS = {'wss': {'name': 'wss'}, }
         self.fileDictWSSnorm = {'wss_norm': {'name': 'wss_norm'}, }
+        self.fileDictWSSnormCG = {'wss_norm_CG': {'name': 'wss_norm_CG'}, }
         self.fileDictDebugRot = {'grad_cor': {'name': 'grad_cor'}, }
 
         # lists of functionals and other scalar output data
@@ -290,6 +292,7 @@ class GeneralProblem(object):
 
             if self.args.wss_method == 'integral':
                 self.SDG = FunctionSpace(self.mesh, 'DG', 0)
+                self.SCG = FunctionSpace(self.mesh, 'CG', 1)
 
             self.tc.end('WSSinit')
 
@@ -315,6 +318,8 @@ class GeneralProblem(object):
             self.fileDict.update(self.fileDictWSSnorm)
             if self.args.wss_method == 'expression':
                 self.fileDict.update(self.fileDictWSS)
+            if self.args.wss_method == 'integral':
+                self.fileDict.update(self.fileDictWSSnormCG)
         if self.args.debug_rot:
             self.fileDict.update(self.fileDictDebugRot)
         # create files
@@ -492,6 +497,7 @@ class GeneralProblem(object):
                 self.fileDict['wss_norm']['file'] << (wss_norm, self.actual_time)
             if self.args.wss_method == 'integral':
                 wss_norm = Function(self.SDG)
+                wss_norm_CG = Function(self.SCG)
                 mS = TestFunction(self.SDG)
                 scaling = 1/FacetArea(self.mesh)
                 stress = self.nu*2*sym(grad(velocity))
@@ -499,6 +505,8 @@ class GeneralProblem(object):
                 wss_norm_form = scaling*mS*sqrt_ufl(inner(wss, wss))*ds
                 assemble(wss_norm_form, tensor=wss_norm.vector())
                 self.fileDict['wss_norm']['file'] << (wss_norm, self.actual_time)
+                wss_norm_CG.assign(project(wss_norm, self.SCG))
+                self.fileDict['wss_norm_CG']['file'] << (wss_norm_CG, self.actual_time)
 
                 # NT this works, but it is hard to display in Paraview (DG, 1) vector space across exterior facet centers
                 # wss_vector = []
