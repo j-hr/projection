@@ -19,23 +19,22 @@ parser.add_argument('mesh', help='Mesh name')
 parser.add_argument('time', help='Total time', type=float)
 parser.add_argument('dt', help='Time step', type=float)
 parser.add_argument('-n', '--name', help='name of this run instance', default='test')
-parser.add_argument('--out', help='Which processors in parallel should print output?', choices=['all', 'main'], default='main')
+parser.add_argument('--out', help='Which processors in parallel should print output?', choices=['all', 'main'],
+                    default='main')
 args, remaining = parser.parse_known_args()
 
 # additional output
 PETScOptions.set('ksp_view')  # shows info about used PETSc Solver and preconditioner
 # if args.solver == 'ipcs1':
     # PETScOptions.set('log_summary')
-if args.solver == 'direct':
-    PETScOptions.set('mat_mumps_icntl_4', 2)  # 1-3 gives lots of information for mumps direct solvers
-    PETScOptions.set('mat_mumps_cntl_1', 0.0001)    # TODO Try this, max 1E-6
 
 # Paralell run initialization
 comm = mpi_comm_world()
 rank = MPI.rank(comm)
 # parameters["std_out_all_processes"] = False   # print only rank==0 process output
-# parameters["ghost_mode"] = "shared_facet"     # nastaveni sdileni entit mezi procesy QQ co dela, je treba?
+# parameters["ghost_mode"] = "shared_facet"     # may be needed for operating DG elements in parallel
 
+# allows output using info() for the main process only
 if rank == 0 or args.out == 'all':
     set_log_level(INFO)
 else:
@@ -45,12 +44,14 @@ info('Running on %d processor(s).' % MPI.size(comm))
 
 if MPI.size(comm) > 1 and args.problem == 'womersley_cylinder':
     info('Womersley cylinder problem is not runnable in parallel due to method of construction of analytic solution,'
-         ' which is used to describe boundary conditions.')
+         ' which is used to describe boundary conditions.')  # the change of mesh format would be also needed
     exit()
 
+# dynamically import selected solver and problem files
 exec('from solvers.%s import Solver' % args.solver)
 exec('from problems.%s import Problem' % args.problem)
 
+# setup and parse problem- and solver-specific command-line arguments
 parser = argparse.ArgumentParser()
 Solver.setup_parser_options(parser)
 Problem.setup_parser_options(parser)
@@ -61,7 +62,7 @@ info('Not parsed:'+str(remaining))
 # initialize time control
 tc = TimeControl()
 
-# initialize metadata
+# initialize metadata (collection of information about particular run of this program)
 metadata = {
     'name': args.name,
 }
@@ -69,36 +70,19 @@ metadata = {
 solver = Solver(args, tc, metadata)
 problem = Problem(args, tc, metadata)
 
-metadata.update({  # QQ move into problem/solver init
-    'problem': str(args.problem),
-    'solver': str(args.solver),
-    'mesh_info': str(problem.mesh),
-})
-
 info("Problem:      " + args.problem)
 info("Solver:       " + args.solver)
-# TODO move to respective files (into init() methods)
-# if args.method in ['chorinExpl', 'ipcs0', 'ipcs1']:
-#     problem.d()['hasTentativeVel'] = True
-# else:
-#     problem.d()['hasTentativeVel'] = False
-# if args.method == 'direct':
-#     if args.solver != 'default':
-#         exit('Parameter solvers should be \'default\' when using direct method.')
-# else:
-#     if args.solvers == 'krylov':
-#         info('Chosen Krylov solvers.')
-#     elif args.solvers == 'direct':
-#         info('Chosen direct solvers.')
 
 # Set parameter values
 dt = args.dt
 ttime = args.time
-info('Time:         %1.0f s' % ttime)
-info('dt:           %d   ms' % (1000 * dt))
+info('Time:         %f s' % ttime)
+info('dt:           %f s' % dt)
 metadata.update({
+    'problem': str(args.problem),
+    'solver': str(args.solver),
+    'mesh_info': str(problem.mesh),
     'dt': dt,
-    'dt_ms': int(round(dt*1000)),
     'time': ttime,
 })
 

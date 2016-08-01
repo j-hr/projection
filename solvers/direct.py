@@ -17,6 +17,11 @@ class Solver(gs.GeneralSolver):
         gs.GeneralSolver.__init__(self, args, tc, metadata)
         self.metadata['hasTentativeV'] = False
         self.metadata['hasTentativeP'] = False
+        PETScOptions.set('mat_mumps_icntl_4', 2)  # 1-3 gives lots of information for mumps direct solvers
+        PETScOptions.set('mat_mumps_cntl_1', 0.0001)
+        # lower values saves more time and memory  at the cost of stability (see MUMPS manual)
+        # default MUMPS value 0.01, empiric minimum 1E-6
+
 
     def __str__(self):
         return 'Newton method with MUMPS LU solver'

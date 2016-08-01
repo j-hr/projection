@@ -10,8 +10,9 @@ regex = re.compile('"f_')
 
 
 def rewrite_xdmf_files(metadata):
-    """changes xdmf vector name "f_something" into something like "IBC_I111velocity_diff" """
-    # NT could be done by function.rename('desired name','label') in FEniCS, applied to functions in GeneralProblem
+    """changes xdmf vector name "f_something" into something like "problem_namevelocity_diff" """
+    # could be done by function.rename('desired name','label') in FEniCS, applied to functions in GeneralProblem
+    # but separate function object for every file or renaming before every save would have to be used
     os.chdir(metadata['dir'])
     for f in os.listdir('.'):
         if f.endswith('xdmf'):
@@ -35,10 +36,13 @@ def rewrite_xdmf_files(metadata):
     try:
         os.remove('temp')
     except OSError:
-        print('temp file already removed')
+        pass
 
 
 def create_scripts(metadata):
+    """
+    Generates scripts for convenient display of results using ParaView 4.4 Python interface
+    """
     abspath = os.path.abspath(os.curdir)
     shutil.copy2('../paraview_scripts/empty.pvsm', 'empty.pvsm')
     if metadata['hasTentativeV']:
