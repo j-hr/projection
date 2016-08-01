@@ -69,7 +69,7 @@ class Solver(gs.GeneralSolver):
         parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
                             choices=['outflow', 'nullspace'], default='outflow')
         parser.add_argument('--precV', help='Preconditioner for tentative velocity GMRES solver', type=str, default='sor')
-        parser.add_argument('--precVC', help='Preconditioner for corrected velocity CG solver', type=str, default='hypre_amg')
+        parser.add_argument('--precVC', help='Preconditioner for corrected velocity CG solver', type=str, default='sor')
         parser.add_argument('--precP', help='Preconditioner for 2nd step solver (Poisson)', choices=['hypre_amg', 'ilu', 'sor'],
                             default='sor')
         parser.add_argument('--solP', help='2nd step solver (Poisson)', choices=['cg', 'gmres', 'richardson', 'tfqmr'],
@@ -165,7 +165,7 @@ class Solver(gs.GeneralSolver):
         if self.cbcDelta:
             delta = Constant(self.stabCoef)*h/(sqrt(inner(u_ext, u_ext))+h)
         elif self.args.cod:
-            delta = Constant(self.stabCoef)*k*h**2/(2*nu*k + k*h*sqrt(inner(u_ext, u_ext))+h**2)
+            delta = Constant(self.stabCoef)*k*h**2/(2*nu*k + k*h*sqrt(DOLFIN_EPS + inner(u_ext, u_ext))+h**2)
         else:
             delta = Constant(self.stabCoef)*h**2/(2*nu*k + k*h*inner(u_ext, u_ext)+h**2)
 
