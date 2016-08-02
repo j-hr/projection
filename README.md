@@ -18,13 +18,16 @@ The test problem cannot be run in parallel due to the technique of generating an
 The code is operated using command line arguments. Basic structure is:
     python main.py problem_name solver_name mesh total_time time_step
 
-|---|
-|problem name|"womersley_cylinder" for test problem or "real" for real aneurysm problem   |
-|solver name|  "ipcs1" for IPCS scheme or its modifications or "direct" for previous solving strategy |
-|mesh|"cyl_c1", "cyl_c2" or "cyl_c3" for test problem meshes (gradually increasing quality)|
-| | "HYK", or "HYK3" for real mesh (coarsest or middle quality)|
-|total time|in seconds, computation will run from 0 to this time (e. g. "1", or "0.25")|
-|time step|in seconds, e. g. "0.1"|
+|argument|option/value|explanation|
+|:---|:---|:---|
+|problem name|"womersley_cylinder"| test problem |
+| |"real"| real aneurysm problem |
+|solver name| "ipcs1"| for IPCS scheme or its modifications|
+| |"direct"|previous solving strategy (Newton method with direct solver)|
+|mesh|"cyl_c1", "cyl_c2" or "cyl_c3"|test problem meshes (gradually increasing quality)|
+| | "HYK", or "HYK3"| real mesh (coarsest or middle quality)|
+|total time|positive float|in seconds, computation will run from 0 to this time|
+|time step|positive float|in seconds|
 
 All parameters are used without quotes. Many optional parameters can be appended.
 
@@ -32,14 +35,22 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 
 ## Optional arguments
 ### General arguments
-|argument|options|explanation|
-|---|
+|argument|option|explanation|
+|:---|:---|:---|
 |-n|any string|name of this run instance|
-|-s|'noSave' (default), 'doSave', 'diff', 'only_vel'|what values are stored in XDMF files during computation: "only_vel" saves only velocity fields, "doSave" adds pressure and divergence of velocity, "diff" adds difference between computed and analytic solution if available|
+|-s|'noSave' (default)|do not save any XDMF files during computation|
+| |'only_vel'|saves only velocity fields|
+| |'doSave'|velocity and its divergence, pressure fields|
+| |'diff'|adds difference between computed and analytic solution|
 |--saventh|positive integer|save velocity, pressure etc. only in every n-th step during first second|
-|--ST|"peak","min"|to save disk space, "peak" saves XDMF files only in second tenth of each second, "min" saves only up to ten steps around peak. Both options do not save anything during first second. Overrides --saventh.|
-|--ffc|'auto_opt', 'uflacs', 'uflacs_opt' (default), 'auto'|FEniCS form compiler options and optimizations (optimized takes longer to compile but result in more efficient code)|
-|--out|"all", "main" (default)|allows output from all processes or only the main one|
+|--ST|"peak"|saves XDMF files only in the second tenth of each second|
+| |"min"|"min" saves only up to ten steps around peak
+| | |Both options do not save anything during first second, overrides --saventh.|
+|--ffc| |FEniCS form compiler options and optimizations|
+| |'uflacs_opt' (default)|takes longer to compile but result in more efficient code|
+| |'auto_opt'|alternative to 'uflacs_opt'|
+| |'auto'|faster compiling, less efficient code (may be used for debugging)|
+|--out|"all"|allows output from all processes|
 ### For "real" problem
 
 ### For "womersley_cylinder" problem
