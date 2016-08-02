@@ -55,15 +55,16 @@ class GeneralProblem(object):
         self.normal = None
         self.mesh = None
         self.facet_function = None
-        self.mesh_volume = None
+        self.mesh_volume = 0   # must be specified in subclass (needed to compute pressure average)
         self.stepsInSecond = None
-        self.volume = None
         self.vSpace = None
         self.vFunction = None
         self.divSpace = None
         self.divFunction = None
         self.pSpace = None
+        # self.pgSpace = None    # NT computing pressure gradient function not used (commented throughout code)
         self.pFunction = None
+        # self.pgFunction = None
         self.solutionSpace = None
         self.solution = None
 
@@ -89,7 +90,6 @@ class GeneralProblem(object):
         # for WSS generation
         metadata['hasWSS'] = (args.wss != 'none')
         metadata['WSSmethod'] = self.args.wss_method
-        self.nu = 0.0
         self.T = None
         self.Tb = None
         self.wall_mesh = None
@@ -183,7 +183,7 @@ class GeneralProblem(object):
             })
 
         # parse arguments
-        self.nu_factor = args.nu
+        self.nu = 0.0  # nu should be specified in subclass (fixed or by argument)
         self.onset = args.onset
         self.onset_factor = 0
         # saving options:
@@ -235,9 +235,8 @@ class GeneralProblem(object):
         parser.add_argument('--saventh', help='save only n-th step in first cycle', type=int, default=1)
         parser.add_argument('--ST', help='save only n-th step in first cycle', choices=['min', 'peak', 'no_restriction'], default='no_restriction')
         # stronger than --saventh, to be used instead of it
+        parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.5)
         # IMP stopped here with parameter documentation
-        parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=1.0)
-        parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.0)
         parser.add_argument('--wss_method', help='compute wall shear stress', choices=['expression', 'integral'], default='integral')
         # expression does not work for too many processors (24 procs for 'HYK' is OK, 48 is too much)
         parser.add_argument('--wss', help='compute wall shear stress', choices=['none', 'all', 'peak'], default='none')
@@ -247,6 +246,10 @@ class GeneralProblem(object):
 
     @staticmethod
     def loadMesh(mesh):
+        """
+        :param mesh: name of mesh file (without extension)
+        :return: tuple mesh, facet function read from .hdf5 file
+        """
         f = HDF5File(mpi_comm_world(), 'meshes/'+mesh+'.hdf5', 'r')
         mesh = Mesh()
         f.read(mesh, 'mesh', False)
@@ -255,6 +258,12 @@ class GeneralProblem(object):
         return mesh, facet_function
 
     def initialize(self, V, Q, PS, D):
+        """
+        :param V: velocity space
+        :param Q: pressure space
+        :param PS: scalar space of same order as V, used for analytic solution generation
+        :param D: divergence of velocity space
+        """
         self.vSpace = V
         self.divSpace = D
         self.pSpace = Q
@@ -262,23 +271,24 @@ class GeneralProblem(object):
         self.vFunction = Function(V)
         self.divFunction = Function(D)
         self.pFunction = Function(Q)
-        self.volume = assemble(interpolate(Expression("1.0"), Q) * dx)
 
         if self.doSave:
-            # self.pgSpace = VectorFunctionSpace(mesh, "DG", 0)
+            # self.pgSpace = VectorFunctionSpace(mesh, "DG", 0)    # used to save pressure gradient as vectors
             # self.pgFunction = Function(self.pgSpace)
             self.initialize_xdmf_files()
         self.stepsInSecond = int(round(1.0 / self.metadata['dt']))
         info('stepsInSecond = %d' % self.stepsInSecond)
 
         if self.args.ST == 'min' or self.args.wss == 'peak':
-            # NT manualy written here:
             # 0.166... is peak for real problem, 0.188 is peak for womersley profile
-            chosen_steps = [0.1, 0.125, 0.15, 0.16, 0.165, 0.166,  0.167, 0.17, 0.188, 0.2]
+            # NT manualy written here:
+            chosen_steps = [0.1, 0.125, 0.15, 0.16, 0.165, 0.166, 0.167, 0.17, 0.188, 0.189, 0.2]
+            # select computed steps nearest to chosen steps:
             self.peak_time_steps = [int(round(chosen / self.metadata['dt'])) for chosen in chosen_steps]
             for ch in self.peak_time_steps:
                 info('Chosen peak time steps at every %dth step in %d steps' % (ch, self.stepsInSecond))
 
+        # IMP cleaning stopped here
         if self.args.wss != 'none':
             # NT implemented in general_problem, but sensible only in womersley_cylinder and real
             # but everything about wss is ommited as long one does not use --wss '...'
@@ -395,7 +405,7 @@ class GeneralProblem(object):
     def averaging_pressure(self, pressure):
         self.tc.start('averageP')
         # averaging pressure (substract average)
-        p_average = assemble((1.0/self.volume) * pressure * dx)
+        p_average = assemble((1.0 / self.mesh_volume) * pressure * dx)
         info('Average pressure: %f' % p_average)
         p_average_function = interpolate(Expression("p", p=p_average), self.pSpace)
         # info(p_average_function, pressure, pressure_Q)
@@ -405,7 +415,8 @@ class GeneralProblem(object):
     def save_pressure(self, is_tent, pressure):
         self.tc.start('saveP')
         self.fileDict['p2' if is_tent else 'p']['file'] << (pressure, self.actual_time)
-        # pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)  # NT normalisation factor defined only in Womersley
+        # NT normalisation factor defined only in Womersley
+        # pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)
         # self.pgFunction.assign(pg)
         # self.fileDict['pg2' if is_tent else 'pg'][0] << (self.pgFunction, self.actual_time
         self.tc.end('saveP')
@@ -508,7 +519,7 @@ class GeneralProblem(object):
                 wss_norm_CG.assign(project(wss_norm, self.SCG))
                 self.fileDict['wss_norm_CG']['file'] << (wss_norm_CG, self.actual_time)
 
-                # NT this works, but it is hard to display in Paraview (DG, 1) vector space across exterior facet centers
+                # NT this works, but it is hard to display in ParaView (DG,1)-vector space across exterior facet centers
                 # wss_vector = []
                 # for i in range(3):
                 #     wss_component = Function(self.SDG)
@@ -519,12 +530,6 @@ class GeneralProblem(object):
                 # self.fileDict['wss']['file'] << (wss_func, self.actual_time)
             self.tc.end('WSS')
             end()
-
-        # following was used to test laplace and stress formulation differences
-        # dsgml = sqrt(assemble((1./self.mesh_volume)*inner(div(2*sym(grad(velocity))-grad(velocity)), div(2*sym(grad(velocity))-grad(velocity)))*dx))
-        # dgt = sqrt(assemble((1./self.mesh_volume)*inner(div(transpose(grad(velocity))), div(transpose(grad(velocity))))*dx))
-        # self.listDict['dsg-l']['list'].append(dsgml)
-        # self.listDict['dgt']['list'].append(dgt)
 
     def compute_outflow(self, velocity):
         out = assemble(inner(velocity, self.normal)*self.get_outflow_measure_form())

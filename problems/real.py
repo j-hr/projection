@@ -23,12 +23,11 @@ class Problem(gp.GeneralProblem):
         self.last_inflow = 0
 
         # input parameters
+        self.nu = self.args.nu  # kinematic viscosity
         self.ic = args.ic
         self.factor = args.factor
         self.metadata['factor'] = self.factor
         self.scale_factor.append(self.factor)
-
-        self.nu = 3.71 * args.nu  # kinematic viscosity
 
         self.tc.start('mesh')
         # Import mesh
@@ -109,6 +108,7 @@ class Problem(gp.GeneralProblem):
         super(Problem, Problem).setup_parser_options(parser)
         parser.add_argument('--ic', help='Initial condition', choices=['zero'], default='zero')
         parser.add_argument('-F', '--factor', help='Velocity scale factor', type=float, default=1.0)
+        parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=3.71)
 
     def initialize(self, V, Q, PS, D):
         super(Problem, self).initialize(V, Q, PS, D)

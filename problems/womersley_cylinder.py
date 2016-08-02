@@ -37,7 +37,7 @@ class Problem(gp.GeneralProblem):
         self.scale_factor.append(self.factor)
 
         # fixed parameters (used in analytic solution and in BC)
-        self.nu = 3.71 * args.nu # kinematic viscosity
+        self.nu = 3.71 * self.args.nufactor  # kinematic viscosity
         self.R = 5.0  # cylinder radius
 
         self.mesh_volume = pi*25.*20.
@@ -94,6 +94,7 @@ class Problem(gp.GeneralProblem):
         # IFNEED smooth initial u0 v_in incompatibility via modification of v_in (options normal, smoothed)
         parser.add_argument('--ic', help='Initial condition', choices=['zero', 'correct'], default='zero')
         parser.add_argument('-F', '--factor', help='Velocity scale factor', type=float, default=1.0)
+        parser.add_argument('--nufactor', help='kinematic viscosity factor', type=float, default=1.0)
 
     def initialize(self, V, Q, PS, D):
         super(Problem, self).initialize(V, Q, PS, D)

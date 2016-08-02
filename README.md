@@ -35,13 +35,14 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 
 ## Optional arguments
 ### General arguments
-|argument|option|explanation|
+|argument|option/value|explanation|
 |:---|:---|:---|
 |-n|any string|name of this run instance|
 |-s|'noSave' (default)|do not save any XDMF files during computation|
 | |'only_vel'|saves only velocity fields|
 | |'doSave'|velocity and its divergence, pressure fields|
 | |'diff'|adds difference between computed and analytic solution|
+|--onset|float|smoothing of boundary condition time span (default 0.5 s)|
 |--saventh|positive integer|save velocity, pressure etc. only in every n-th step during first second|
 |--ST|"peak"|saves XDMF files only in the second tenth of each second|
 | |"min"|"min" saves only up to ten steps around peak
@@ -51,9 +52,15 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 | |'auto_opt'|alternative to 'uflacs_opt'|
 | |'auto'|faster compiling, less efficient code (may be used for debugging)|
 |--out|"all"|allows output from all processes|
-### For "real" problem
 
+### For "real" problem
+|argument|option/value|explanation|
+|:---|:---|:---|
+|--nu|positive float|kinematic viscosity (default 3.71 mm<sup>2</sup>/s)|
 ### For "womersley_cylinder" problem
+|argument|option/value|explanation|
+|:---|:---|:---|
+|--nufactor|10.0, 1.0, 0.1 or 0.01|multiplicative factor for kinematic viscosity (default 1.0 value corresponds to viscosity 3.71 mm<sup>2</sup>/s)|
 
 ### For IPCS solver
 
