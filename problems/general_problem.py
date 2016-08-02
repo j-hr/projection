@@ -44,11 +44,6 @@ class GeneralProblem(object):
         self.outflow_area = None
         self.outflow_measures = []
 
-        self.normal = None
-        self.mesh = None
-        self.facet_function = None
-        self.mesh_volume = None
-
         # stopping criteria (for relative H1 velocity error norm) (if known)
         self.divergence_treshold = 10
 
@@ -56,6 +51,11 @@ class GeneralProblem(object):
         self.last_status_functional = 0.0
         self.status_functional_str = 'to be defined in Problem class'
 
+        # mesh and function objects
+        self.normal = None
+        self.mesh = None
+        self.facet_function = None
+        self.mesh_volume = None
         self.stepsInSecond = None
         self.volume = None
         self.vSpace = None
@@ -67,6 +67,7 @@ class GeneralProblem(object):
         self.solutionSpace = None
         self.solution = None
 
+        # time related variables
         self.actual_time = 0.0
         self.step_number = 0
         self.save_this_step = False
@@ -74,6 +75,8 @@ class GeneralProblem(object):
         self.N1 = None
         self.N0 = None
 
+        # lists used for storing normalization and scaling coefficients
+        # (time independent, mainly used in womersley_cylinder)
         self.vel_normalization_factor = []
         self.pg_normalization_factor = []
         self.p_normalization_factor = []
@@ -100,7 +103,7 @@ class GeneralProblem(object):
         self.nb = None
         self.peak_time_steps = None
 
-        # dictionaries for output files
+        # dictionaries for output XDMF files
         self.fileDict = {'u': {'name': 'velocity'},
                          'p': {'name': 'pressure'},
                          # 'pg': {'name': 'pressure_grad'},
@@ -115,8 +118,6 @@ class GeneralProblem(object):
         #                      'pg2': {'name': 'pressure_grad_tent'}}
         self.fileDictTentPDiff = {'p2D': {'name': 'pressure_tent_diff'}}
         #                          'pg2D': {'name': 'pressure_grad_tent_diff'}}
-        self.fileDictLDSG = {'ldsg': {'name': 'ldsg'},
-                             'ldsg2': {'name': 'ldsg_tent'}}
         self.fileDictWSS = {'wss': {'name': 'wss'}, }
         self.fileDictWSSnorm = {'wss_norm': {'name': 'wss_norm'}, }
         self.fileDictWSSnormCG = {'wss_norm_CG': {'name': 'wss_norm_CG'}, }
@@ -141,32 +142,36 @@ class GeneralProblem(object):
                    'norm': self.pg_normalization_factor},
             'pg2': {'list': [], 'name': 'computed pressure tent gradient', 'abrev': 'PTG', 'scale': self.scale_factor,
                     'norm': self.pg_normalization_factor},
-            # 'dsg-l': {'list': [], 'name': 'div(2sym(grad(u))-laplace(u))', 'abrev': 'DSG-L'},  # div(2sym(grad(u))-laplace(u))
-            # 'dgt': {'list': [], 'name': 'div(transpose(grad(u)))', 'abrev': 'DGT'},  # div(transpose(grad(u)))
         }
         if self.has_analytic_solution:
             self.listDict.update({
-                'u_L2': {'list': [], 'name': 'corrected velocity L2 error', 'abrev': 'CE_L2', 'scale': self.scale_factor,
-                         'relative': 'av_norm_L2', 'slist': [], 'norm': self.vel_normalization_factor},
-                'u2L2': {'list': [], 'name': 'tentative velocity L2 error', 'abrev': 'TE_L2', 'scale': self.scale_factor,
-                         'relative': 'av_norm_L2', 'slist': [], 'norm': self.vel_normalization_factor},
-                'u_L2test': {'list': [], 'name': 'test corrected L2 velocity error', 'abrev': 'TestCE_L2', 'scale': self.scale_factor},
-                'u2L2test': {'list': [], 'name': 'test tentative L2 velocity error', 'abrev': 'TestTE_L2', 'scale': self.scale_factor},
-                'u_H1': {'list': [], 'name': 'corrected velocity H1 error', 'abrev': 'CE_H1', 'scale': self.scale_factor,
-                         'relative': 'av_norm_H1', 'slist': []},
-                'u2H1': {'list': [], 'name': 'tentative velocity H1 error', 'abrev': 'TE_H1', 'scale': self.scale_factor,
-                         'relative': 'av_norm_H1', 'slist': []},
-                'u_H1test': {'list': [], 'name': 'test corrected H1 velocity error', 'abrev': 'TestCE_H1', 'scale': self.scale_factor},
-                'u2H1test': {'list': [], 'name': 'test tentative H1 velocity error', 'abrev': 'TestTE_H1', 'scale': self.scale_factor},
+                'u_L2': {'list': [], 'name': 'corrected velocity L2 error', 'abrev': 'CE_L2',
+                         'scale': self.scale_factor, 'relative': 'av_norm_L2', 'slist': [],
+                         'norm': self.vel_normalization_factor},
+                'u2L2': {'list': [], 'name': 'tentative velocity L2 error', 'abrev': 'TE_L2',
+                         'scale': self.scale_factor, 'relative': 'av_norm_L2', 'slist': [],
+                         'norm': self.vel_normalization_factor},
+                'u_L2test': {'list': [], 'name': 'test corrected L2 velocity error', 'abrev': 'TestCE_L2',
+                             'scale': self.scale_factor},
+                'u2L2test': {'list': [], 'name': 'test tentative L2 velocity error', 'abrev': 'TestTE_L2',
+                             'scale': self.scale_factor},
+                'u_H1': {'list': [], 'name': 'corrected velocity H1 error', 'abrev': 'CE_H1',
+                         'scale': self.scale_factor, 'relative': 'av_norm_H1', 'slist': []},
+                'u2H1': {'list': [], 'name': 'tentative velocity H1 error', 'abrev': 'TE_H1',
+                         'scale': self.scale_factor, 'relative': 'av_norm_H1', 'slist': []},
+                'u_H1test': {'list': [], 'name': 'test corrected H1 velocity error', 'abrev': 'TestCE_H1',
+                             'scale': self.scale_factor},
+                'u2H1test': {'list': [], 'name': 'test tentative H1 velocity error', 'abrev': 'TestTE_H1',
+                             'scale': self.scale_factor},
                 'apg': {'list': [], 'name': 'analytic pressure gradient', 'abrev': 'APG', 'scale': self.scale_factor,
                         'norm': self.pg_normalization_factor},
                 'av_norm_L2': {'list': [], 'name': 'analytic velocity L2 norm', 'abrev': 'AVN_L2'},
                 'av_norm_H1': {'list': [], 'name': 'analytic velocity H1 norm', 'abrev': 'AVN_H1'},
                 'ap_norm': {'list': [], 'name': 'analytic pressure norm', 'abrev': 'APN'},
-                'p': {'list': [], 'name': 'pressure L2(0) error', 'abrev': 'PE', 'scale': self.scale_factor, 'slist': [],
-                      'norm': self.p_normalization_factor},
-                'pgE': {'list': [], 'name': 'computed pressure gradient error', 'abrev': 'PGE', 'scale': self.scale_factor,
-                        'norm': self.pg_normalization_factor, 'slist': []},
+                'p': {'list': [], 'name': 'pressure L2(0) error', 'abrev': 'PE', 'scale': self.scale_factor,
+                      'slist': [], 'norm': self.p_normalization_factor},
+                'pgE': {'list': [], 'name': 'computed pressure gradient error', 'abrev': 'PGE',
+                        'scale': self.scale_factor, 'norm': self.pg_normalization_factor, 'slist': []},
                 'pgEA': {'list': [], 'name': 'computed absolute pressure gradient error', 'abrev': 'PGEA',
                          'scale': self.scale_factor, 'norm': self.pg_normalization_factor},
                 'p2': {'list': [], 'name': 'pressure tent L2(0) error', 'abrev': 'PTE', 'scale': self.scale_factor,
@@ -181,7 +186,7 @@ class GeneralProblem(object):
         self.nu_factor = args.nu
         self.onset = args.onset
         self.onset_factor = 0
-
+        # saving options:
         self.doSave = False
         self.saveOnlyVel = False
         self.doSaveDiff = False
@@ -199,7 +204,7 @@ class GeneralProblem(object):
         elif option == 'noSave':
             self.doSave = False
             info('Saving solution OFF.')
-
+        # error control options:
         self.doErrControl = None
         self.testErrControl = False
         if args.error == "noEC":
@@ -213,6 +218,7 @@ class GeneralProblem(object):
             else:
                 info("Error control on")
 
+        # set directory for results and reports
         self.str_dir_name = "%s_%s_results" % (self.problem_code, metadata['name'])
         self.metadata['dir'] = self.str_dir_name
         # create directory, needed because of using "with open(..." construction later
@@ -221,7 +227,6 @@ class GeneralProblem(object):
 
     @staticmethod
     def setup_parser_options(parser):
-        parser.add_argument('-e', '--error', help='Error control mode', choices=['doEC', 'noEC', 'test'], default='doEC')
         parser.add_argument('-S', '--save', help='Save solution mode', choices=['doSave', 'noSave', 'diff', 'only_vel'],
                             default='noSave')
         #   doSave: create .xdmf files with velocity, pressure, divergence
@@ -233,12 +238,12 @@ class GeneralProblem(object):
         # IMP stopped here with parameter documentation
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=1.0)
         parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.0)
-        parser.add_argument('--ldsg', help='save laplace(u) - div(2sym(grad(u))) difference', action='store_true')
         parser.add_argument('--wss_method', help='compute wall shear stress', choices=['expression', 'integral'], default='integral')
         # expression does not work for too many processors (24 procs for 'HYK' is OK, 48 is too much)
         parser.add_argument('--wss', help='compute wall shear stress', choices=['none', 'all', 'peak'], default='none')
         # NT to use wss -S must be at least only_vel (doSave must be True for wss work properly)
         parser.add_argument('--debug_rot', help='save more information about rotation correction', action='store_true')
+        parser.add_argument('-e', '--error', help='Error control mode', choices=['doEC', 'noEC', 'test'], default='doEC')
 
     @staticmethod
     def loadMesh(mesh):
@@ -316,8 +321,6 @@ class GeneralProblem(object):
             self.fileDict.update(self.fileDictTentP)
             if self.doSaveDiff:
                 self.fileDict.update(self.fileDictTentPDiff)
-        if self.args.ldsg:
-            self.fileDict.update(self.fileDictLDSG)
         if self.args.wss != 'none':
             self.fileDict.update(self.fileDictWSSnorm)
             if self.args.wss_method == 'expression':
@@ -355,13 +358,6 @@ class GeneralProblem(object):
         if self.doSaveDiff:
             self.vFunction.assign((1.0 / self.vel_normalization_factor[0]) * (field - self.solution))
             self.fileDict['u2D' if is_tent else 'uD']['file'] << (self.vFunction, self.actual_time)
-        if self.args.ldsg:
-            # info(div(2.*sym(grad(field))-grad(field)).ufl_shape)
-            form = div(2.*sym(grad(field))-grad(field))
-            self.pFunction.assign(project(sqrt_ufl(inner(form, form)), self.pSpace))
-            self.fileDict['ldsg2' if is_tent else 'ldsg']['file'] << (self.pFunction, self.actual_time)
-            # self.vFunction.assign(project(div(2.*sym(grad(field))-grad(field)), self.vSpace))
-            # self.fileDict['ldsg2' if is_tent else 'ldsg']['file'] << (self.vFunction, self.actual_time)
 
     def compute_err(self, is_tent, velocity, t):
         if self.doErrControl and self.has_analytic_solution:

@@ -37,7 +37,7 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 |-n|any string|name of this run instance|
 |-s|'noSave' (default), 'doSave', 'diff', 'only_vel'|what values are stored in XDMF files during computation: "only_vel" saves only velocity fields, "doSave" adds pressure and divergence of velocity, "diff" adds difference between computed and analytic solution if available|
 |--saventh|positive integer|save velocity, pressure etc. only in every n-th step during first second|
-|--ST|"peak","min"|to save disk space, "peak" saves XDMF files only in second tenth of each second, "min" saves only up to ten manually chosen steps around peak. Both options do not save anything during first second. Overrides --saventh.|
+|--ST|"peak","min"|to save disk space, "peak" saves XDMF files only in second tenth of each second, "min" saves only up to ten steps around peak. Both options do not save anything during first second. Overrides --saventh.|
 |--ffc|'auto_opt', 'uflacs', 'uflacs_opt' (default), 'auto'|FEniCS form compiler options and optimizations (optimized takes longer to compile but result in more efficient code)|
 |--out|"all", "main" (default)|allows output from all processes or only the main one|
 ### For "real" problem
