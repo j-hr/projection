@@ -11,6 +11,7 @@ from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl, Identity
 from math import sqrt, pi, cos, modf
 import numpy as np
 
+
 class GeneralProblem(object):
     def __init__(self, args, tc, metadata):
         self.MPI_rank = MPI.rank(mpi_comm_world())
@@ -24,6 +25,7 @@ class GeneralProblem(object):
         self.metadata['hasAnalyticSolution'] = self.has_analytic_solution
 
         self.args = args
+        # Time control
         self.tc = tc
         self.tc.init_watch('mesh', 'mesh import', True)
         self.tc.init_watch('saveP', 'Saved pressure', True)
@@ -40,11 +42,12 @@ class GeneralProblem(object):
         # 2. implement self.compute_outflow and get_outflow_measures
         self.can_force_outflow = False
         self.outflow_area = None
+        self.outflow_measures = []
+
         self.normal = None
         self.mesh = None
         self.facet_function = None
         self.mesh_volume = None
-        self.outflow_measures = []
 
         # stopping criteria (for relative H1 velocity error norm) (if known)
         self.divergence_treshold = 10
@@ -182,7 +185,7 @@ class GeneralProblem(object):
         self.doSave = False
         self.saveOnlyVel = False
         self.doSaveDiff = False
-        self.save_nth = args.savespace
+        self.save_nth = args.saventh
         option = args.save
         if option == 'doSave' or option == 'diff' or option == 'only_vel':
             self.doSave = True
@@ -224,9 +227,10 @@ class GeneralProblem(object):
         #   doSave: create .xdmf files with velocity, pressure, divergence
         #   diff: save also difference vel-sol
         #   noSave: do not create .xdmf files with velocity, pressure, divergence
-        parser.add_argument('--savespace', help='save only n-th step in first cycle', type=int, default=1)
+        parser.add_argument('--saventh', help='save only n-th step in first cycle', type=int, default=1)
         parser.add_argument('--ST', help='save only n-th step in first cycle', choices=['min', 'peak', 'no_restriction'], default='no_restriction')
-        # stronger than --savespace, to be used instead of it
+        # stronger than --saventh, to be used instead of it
+        # IMP stopped here with parameter documentation
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=1.0)
         parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.0)
         parser.add_argument('--ldsg', help='save laplace(u) - div(2sym(grad(u))) difference', action='store_true')
@@ -531,10 +535,26 @@ class GeneralProblem(object):
         return out
 
     def get_outflow_measures(self):
-        pass
+        """
+        return list of Measure objects for outflow boundary parts
+        must be overridden in Problem before use (if needed)
+        """
+        info('Integration over outflow for this problem was not properly implemented.')
 
     def get_outflow_measure_form(self):
-        pass
+        """
+        returns term (dSout1 + ... + dSoutN) that can be used in form to integrate over all outflow boundary parts
+        works if get_outflow_measures is implemented
+        """
+        if not self.outflow_measures:
+            self.outflow_measures = self.get_outflow_measures()
+        if len(self.outflow_measures) == 1:
+            return self.outflow_measures[0]
+        else:
+            out = self.outflow_measures[0]
+            for m in self.outflow_measures[1:]:
+                out += m
+            return out
 
     def get_metadata_to_save(self):
         return str(cPickle.dumps(self.metadata)).replace('\n', '$')
@@ -658,8 +678,8 @@ class GeneralProblem(object):
         self.tc.start('status')
         f = open(self.metadata['name'] + ".run", "w")
         progress = t/self.metadata['time']
-        f.write('t = %5.3f (dt=%3dms)\nprogress = %3.0f %%\n%s = %5.3f\n' %
-                (t, self.metadata['dt_ms'], 100*progress, self.status_functional_str, self.last_status_functional))
+        f.write('t = %5.3f (dt=%f)\nprogress = %3.0f %%\n%s = %5.3f\n' %
+                (t, self.metadata['dt'], 100*progress, self.status_functional_str, self.last_status_functional))
         f.close()
         self.tc.end('status')
 

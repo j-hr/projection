@@ -101,16 +101,6 @@ class Problem(gp.GeneralProblem):
     def get_outflow_measures(self):
         return self.outflow_measures
 
-    def get_outflow_measure_form(self):
-        # return sum(m for m in self.outflow_measures)   # NT does not work this way, sum() handles only ints or floats
-        if len(self.outflow_measures) == 1:
-            return self.outflow_measures[0]
-        else:
-            out = self.outflow_measures[0]
-            for m in self.outflow_measures[1:]:
-                out += m
-            return out
-
     def __str__(self):
         return 'test on real mesh'
 

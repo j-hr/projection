@@ -153,9 +153,6 @@ class Problem(gp.GeneralProblem):
     def get_outflow_measures(self):
         return [self.dsOut]
 
-    def get_outflow_measure_form(self):
-        return self.dsOut
-
     def get_v_solution(self, t):
         v = self.assemble_solution(t)
         return v

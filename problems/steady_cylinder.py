@@ -150,9 +150,6 @@ class Problem(gp.GeneralProblem):
     def get_outflow_measures(self):
         return [self.dsOut]
 
-    def get_outflow_measure_form(self):
-        return self.dsOut
-
     def get_v_solution(self, t):
         v = interpolate(Expression(("0.0", "0.0", "factor*(1081.48-43.2592*(x[0]*x[0]+x[1]*x[1]))"),
                                    factor=self.factor), self.vSpace)
