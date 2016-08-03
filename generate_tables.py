@@ -2,6 +2,9 @@ from __future__ import print_function
 import csv, os, glob
 import argparse
 
+# program to generate CSV tables from .report files, used for test problem
+# no longer maintained
+
 parser = argparse.ArgumentParser()
 parser.add_argument('-dir', help='working directory', type=str, default=".")
 args = parser.parse_args()

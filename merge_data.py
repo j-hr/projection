@@ -5,6 +5,9 @@ __author__ = 'jh'
 import os
 import argparse
 
+# program used for collecting information for further use (e. g. by generate_plots.py)
+# program is working
+
 parser = argparse.ArgumentParser()
 parser.add_argument('-dir', help='working directory', type=str, default=".")
 args = parser.parse_args()
@@ -22,16 +25,14 @@ merged_report_time_lines = ['not_used']
 for i in range(1, 6):
     temp = open('temp_merged_time_lines%d.csv' % i, 'w')
     merged_report_time_lines.append(temp)
+# select folders in working directory
 for f in os.listdir(os.path.abspath(os.curdir)):
-    # print(f)
     if f[0] != '.':
-        # print(os.getcwd())
-        # print(os.stat(f))
         if os.path.isdir(f):
             search_dirs.append(f)
-# print(search_dirs)
+print(search_dirs)
+# search selected folders for report files
 for sd in search_dirs:
-    # print(sd)
     for f in os.listdir(os.path.abspath(sd)):
         if not os.path.isdir(f):
             if f == 'report_h.csv':

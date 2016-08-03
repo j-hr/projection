@@ -8,6 +8,12 @@ import math
 import numpy
 __author__ = 'jh'
 
+# this program was used to generate convergence and time-line plots for the test problem
+# it is no longer maintained, needs to be actualized before use
+#    metadata are stored in separate file instead of in report.csv
+#    program assumes name structure XXXXXFMT (X name, F factor number, M mesh number, T time step number)
+# program assumes that merge_data.py was run to collect information from results (format of results changed a bit)
+
 # global variables
 characteristics = []
 ch_index = {}
