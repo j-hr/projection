@@ -1,15 +1,14 @@
 from __future__ import print_function
-from dolfin import assemble, interpolate, Expression, Function, DirichletBC, norm, errornorm, Constant
-from dolfin.cpp.common import toc, mpi_comm_world, DOLFIN_EPS
-from dolfin.cpp.io import HDF5File
-from dolfin.cpp.mesh import Mesh, MeshFunction
-from ufl import Measure, dx, cos, sin, FacetNormal, inner, grad, outer, Identity, sym
-from math import pi, sqrt
 
 import math
-
-from problems import general_problem as gp
+from dolfin import assemble, interpolate, Expression, Function, DirichletBC, norm, errornorm, Constant
+from dolfin.cpp.common import toc, mpi_comm_world
+from dolfin.cpp.io import HDF5File
+from math import pi, sqrt
+from ufl import Measure, cos, sin, FacetNormal, inner, grad, outer, Identity, sym
 import womersleyBC
+from problems import general_problem as gp
+
 print('Imported womersley_cylinder problem.')
 
 
@@ -19,14 +18,11 @@ class Problem(gp.GeneralProblem):
         self.problem_code = 'WCYL'
         super(Problem, self).__init__(args, tc, metadata)
 
-        # TODO check if really used here
         self.tc.init_watch('assembleSol', 'Assembled analytic solution', True)
         self.tc.init_watch('analyticP', 'Analytic pressure', True)
         self.tc.init_watch('analyticVnorms', 'Computed analytic velocity norms', True)
         self.tc.init_watch('errorP', 'Computed pressure error', True)
-        self.tc.init_watch('errorV', 'Computed velocity error', True)
         self.tc.init_watch('errorForce', 'Computed force error', True)
-        self.tc.init_watch('errorVtest', 'Computed velocity error test', True)
         self.tc.init_watch('computePG', 'Computed pressure gradient', True)
 
         self.name = 'womersley_cylinder'
@@ -92,8 +88,6 @@ class Problem(gp.GeneralProblem):
     @staticmethod
     def setup_parser_options(parser):
         super(Problem, Problem).setup_parser_options(parser)
-        # QQ precomputed initial condition?
-        # IFNEED smooth initial u0 v_in incompatibility via modification of v_in (options normal, smoothed)
         parser.add_argument('--ic', help='Initial condition', choices=['zero', 'correct'], default='zero')
         parser.add_argument('-F', '--factor', help='Velocity scale factor', type=float, default=1.0)
         parser.add_argument('--nufactor', help='kinematic viscosity factor', type=float, default=1.0)
@@ -120,8 +114,6 @@ class Problem(gp.GeneralProblem):
             interpolate(womersleyBC.average_analytic_pressure_expr(self.factor), self.pSpace), norm_type='L2'))
         self.vel_normalization_factor.append(norm(
             interpolate(womersleyBC.average_analytic_velocity_expr(self.factor), self.vSpace), norm_type='L2'))
-        # print('Normalisation factors (vel, p, pg):', self.vel_normalization_factor[0], self.p_normalization_factor[0],
-        #       self.pg_normalization_factor[0])
 
         one = (interpolate(Expression('1.0'), Q))
         self.outflow_area = assemble(one*self.dsOut)
@@ -129,8 +121,7 @@ class Problem(gp.GeneralProblem):
 
     def get_boundary_conditions(self, use_pressure_BC, v_space, p_space):
         # boundary parts: 1 walls, 2 inflow, 3 outflow
-        # Boundary conditions
-        bc0 = DirichletBC(v_space, (0.0, 0.0, 0.0), self.facet_function, 1)
+        bc0 = DirichletBC(v_space, (0.0, 0.0, 0.0), self.facet_function, 1)   # no-slip
         inflow = DirichletBC(v_space, self.v_in, self.facet_function, 2)
         bcu = [inflow, bc0]
         bcp = []
@@ -192,10 +183,17 @@ class Problem(gp.GeneralProblem):
         self.listDict['av_norm_H1w']['list'].append(self.analytic_v_norm_H1w)
         self.tc.end('analyticVnorms')
 
-    def assemble_solution(self, t):  # returns Womersley sol for time t
+    def assemble_solution(self, t):  # returns
+        """
+        :param t: time
+        :return: Womersley flow (analytic solution) at time t
+        analytic solution at any time is a steady parabolic flow + linear combination of 8 modes
+        modes were precomputed as 8 functions on given mesh and stored in hdf5 file
+        """
         if self.tc is not None:
             self.tc.start('assembleSol')
         sol = Function(self.solutionSpace)
+        # analytic solution has zero x and y components
         dofs2 = self.solutionSpace.sub(2).dofmap().dofs()  # gives field of indices corresponding to z axis
         sol.assign(Constant(("0.0", "0.0", "0.0")))  # QQ not needed
         sol.vector()[dofs2] += self.factor * self.bessel_parabolic.vector().array()  # parabolic part of sol
@@ -206,8 +204,8 @@ class Problem(gp.GeneralProblem):
             self.tc.end('assembleSol')
         return sol
 
-    # load precomputed Bessel functions
     def load_precomputed_bessel_functions(self, PS):
+        """ loads precomputed Bessel functions (modes of analytic solution) """
         f = HDF5File(mpi_comm_world(), 'precomputed/precomputed_' + self.precomputed_filename + '.hdf5', 'r')
         temp = toc()
         fce = Function(PS)
@@ -218,9 +216,6 @@ class Problem(gp.GeneralProblem):
             self.bessel_real.append(Function(fce))
             f.read(fce, "imag%d" % i)
             self.bessel_complex.append(Function(fce))
-            # plot(coefs_r_prec[i], title="coefs_r_prec", interactive=True) # reasonable values
-            # plot(coefs_i_prec[i], title="coefs_i_prec", interactive=True) # reasonable values
-        # plot(c0_prec,title="c0_prec",interactive=True) # reasonable values
         print("Loaded partial solution functions. Time: %f" % (toc() - temp))
 
     def compute_err(self, is_tent, velocity, t):
@@ -245,14 +240,16 @@ class Problem(gp.GeneralProblem):
                                (T(pressure, velocity) - T(self.sol_p, self.solution)) * self.normal) * self.dsWall))
         an_force = sqrt(assemble(inner(T(self.sol_p, self.solution) * self.normal,
                                             T(self.sol_p, self.solution) * self.normal) * self.dsWall))
-        an_f_normal = sqrt(assemble(inner(inner(T(self.sol_p, self.solution) * self.normal, self.normal),
-                                               inner(T(self.sol_p, self.solution) * self.normal, self.normal)) * self.dsWall))
-        error_f_normal = sqrt(
-                assemble(inner(inner((T(self.sol_p, self.solution) - T(pressure, velocity)) * self.normal, self.normal),
-                               inner((T(self.sol_p, self.solution) - T(pressure, velocity)) * self.normal, self.normal)) * self.dsWall))
-        an_f_shear = sqrt(
-                assemble(inner((I - outer(self.normal, self.normal)) * T(self.sol_p, self.solution) * self.normal,
-                               (I - outer(self.normal, self.normal)) * T(self.sol_p, self.solution) * self.normal) * self.dsWall))
+        an_f_normal = sqrt(assemble(
+            inner(inner(T(self.sol_p, self.solution) * self.normal, self.normal),
+                  inner(T(self.sol_p, self.solution) * self.normal, self.normal)) * self.dsWall))
+        error_f_normal = sqrt(assemble(
+            inner(inner((T(self.sol_p, self.solution) - T(pressure, velocity)) * self.normal, self.normal),
+                  inner((T(self.sol_p, self.solution) - T(pressure, velocity)) * self.normal, self.normal)) *
+            self.dsWall))
+        an_f_shear = sqrt(assemble(
+            inner((I - outer(self.normal, self.normal)) * T(self.sol_p, self.solution) * self.normal,
+                  (I - outer(self.normal, self.normal)) * T(self.sol_p, self.solution) * self.normal) * self.dsWall))
         error_f_shear = sqrt(
                 assemble(inner((I - outer(self.normal, self.normal)) *
                                (T(self.sol_p, self.solution) - T(pressure, velocity)) * self.normal,
@@ -274,7 +271,7 @@ class Problem(gp.GeneralProblem):
         p_in = assemble((1.0/self.area) * pressure * self.dsIn)
         p_out = assemble((1.0/self.area) * pressure * self.dsOut)
         computed_gradient = (p_out - p_in)/20.0
-        # 20.0 is a length of a pipe NT should depend on mesh length (implement throuhg metadata or function of mesh)
+        # 20.0 is a length of a pipe NT should depend on mesh length (implement through metadata or function of mesh)
         self.tc.end('computePG')
         self.tc.start('analyticP')
         analytic_gradient = womersleyBC.analytic_pressure_grad(self.factor, self.actual_time)
@@ -293,7 +290,7 @@ class Problem(gp.GeneralProblem):
         self.listDict['pgEA2' if is_tent else 'pgEA']['list'].append(abs(computed_gradient-analytic_gradient))
         self.tc.end('errorP')
         if self.doSaveDiff:
-            sol_pg_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pg_normalization_factor[0])
+            # sol_pg_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pg_normalization_factor[0])
             # sol_pg = interpolate(sol_pg_expr, self.pgSpace)
             # plot(sol_p, title="sol")
             # plot(pressure, title="p")

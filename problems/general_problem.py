@@ -39,6 +39,8 @@ class GeneralProblem(object):
         self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
         self.tc.init_watch('WSSinit', 'Initialized mesh for WSS', False)
         self.tc.init_watch('WSS', 'Computed and saved WSS', True)
+        self.tc.init_watch('errorV', 'Computed velocity error', True)
+        self.tc.init_watch('errorVtest', 'Computed velocity error test', True)
 
         # If it is sensible (and implemented) to force pressure gradient on outflow boundary
         # 1. set self.outflow_area in initialize

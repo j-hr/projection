@@ -1,16 +1,12 @@
 from __future__ import print_function
 
-from dolfin import assemble, Expression, Function, DirichletBC, plot, interpolate, DOLFIN_EPS
+import csv
+import math
+from dolfin import assemble, Expression, Function, DirichletBC
 from dolfin.cpp.common import info
 from dolfin.cpp.function import near
-from dolfin.cpp.mesh import Mesh, MeshFunction, FacetFunction, vertices, facets
 from math import sqrt
-from ufl import Measure, FacetNormal, inner, ds, div, transpose, grad, dx, sym
-import csv
-
-import math
-
-import time_control
+from ufl import Measure, FacetNormal, inner
 from problems import general_problem as gp
 
 
@@ -125,7 +121,7 @@ class Problem(gp.GeneralProblem):
                                                                    obj['center'], obj['normal'], float(obj['radius']))
 
     class InputVelocityProfile(Expression):
-        def __init__(self, factor, center, normal, radius, **kwargs):
+        def __init__(self, factor, center, normal, radius):
             self.t = 0.
             self.onset_factor = 1.
             self.factor = factor

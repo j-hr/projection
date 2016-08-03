@@ -69,7 +69,8 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 |--nufactor|10.0, 1.0, 0.1 or 0.01|multiplicative factor for kinematic viscosity (default 1.0 value corresponds to 3.71 mm<sup>2</sup>/s)|
 |-e|"doEC" (default)/"noEC"|do or do not compute error using analytic solution|
 |-F|positive float|inflow velocity multiplicative factor|
-
+|--ic|"zero"|use zero initial conditions|
+| |"correct"|use analytic solution as initial conditions|
 ### For IPCS solver
 
 ### For direct solver
