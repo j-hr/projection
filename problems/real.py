@@ -1,12 +1,14 @@
 from __future__ import print_function
 
-from dolfin import assemble, Expression, Function, DirichletBC, plot, interpolate
+from dolfin import assemble, Expression, Function, DirichletBC, plot, interpolate, DOLFIN_EPS
 from dolfin.cpp.common import info
 from dolfin.cpp.function import near
 from dolfin.cpp.mesh import Mesh, MeshFunction, FacetFunction, vertices, facets
 from math import sqrt
 from ufl import Measure, FacetNormal, inner, ds, div, transpose, grad, dx, sym
 import csv
+
+import math
 
 import time_control
 from problems import general_problem as gp
@@ -24,21 +26,23 @@ class Problem(gp.GeneralProblem):
 
         # input parameters
         self.nu = self.args.nu  # kinematic viscosity
-        self.ic = args.ic
         self.factor = args.factor
         self.metadata['factor'] = self.factor
         self.scale_factor.append(self.factor)
 
         self.tc.start('mesh')
         # Import mesh
-        self.compatible_meshes = ['HYK', 'HYK3', 'HYK10']
-        if args.mesh not in self.compatible_meshes:
-            exit('Bad mesh, should be some from %s' % str(self.compatible_meshes))
-        self.mesh, self.facet_function = super(Problem, self).loadMesh(args.mesh)
-        info("Mesh name: " + args.mesh + "    " + str(self.mesh))
-        f_ini = open('meshes/'+args.mesh+'.ini', 'r')
-        reader = csv.reader(f_ini, delimiter=' ', escapechar='\\')
+        try:
+            self.mesh, self.facet_function = super(Problem, self).loadMesh(args.mesh)
+            info("Mesh name: " + args.mesh + "    " + str(self.mesh))
+            f_ini = open('meshes/'+args.mesh+'.ini', 'r')
+            reader = csv.reader(f_ini, delimiter=' ', escapechar='\\')
+        except (EnvironmentError, RuntimeError):
+            print('Unable to open mesh.hdf5 or mesh.ini file. Check if the mesh was prepared to be used '
+                  'with \"real\" problem.')
+            exit(1)
 
+        # load inflows and outflows (interfaces) from mesh.ini file
         obj = None
         self.interfaces = []
         for row in reader:
@@ -63,6 +67,7 @@ class Problem(gp.GeneralProblem):
         f_ini.close()
         self.tc.end('mesh')
 
+        # collect inflows and outflows into separate lists
         self.outflow_area = 0
         self.inflows = []
         self.outflows = []
@@ -94,7 +99,7 @@ class Problem(gp.GeneralProblem):
         for obj in self.outflows:
             n = obj['number']
             self.listDict.update({'outflow' + n:
-                                      {'list': [], 'name': 'outflow rate ' + n, 'abrev': 'OUT' + n, 'slist': []}})
+                                  {'list': [], 'name': 'outflow rate ' + n, 'abrev': 'OUT' + n, 'slist': []}})
         self.can_force_outflow = True
 
     def get_outflow_measures(self):
@@ -106,25 +111,21 @@ class Problem(gp.GeneralProblem):
     @staticmethod
     def setup_parser_options(parser):
         super(Problem, Problem).setup_parser_options(parser)
-        parser.add_argument('--ic', help='Initial condition', choices=['zero'], default='zero')
+        #parser.add_argument('--ic', help='Initial condition', choices=['zero'], default='zero')
         parser.add_argument('-F', '--factor', help='Velocity scale factor', type=float, default=1.0)
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=3.71)
 
     def initialize(self, V, Q, PS, D):
         super(Problem, self).initialize(V, Q, PS, D)
-
-        info("IC type: " + self.ic)
+        #info("IC type: " + self.ic)
         info("Velocity scale factor = %4.2f" % self.factor)
-
         # generate inflow profiles
         for obj in self.inflows:
-            obj['velocity_profile'] = Problem.InputVelocityProfile(self.factor*float(obj['reference_coef']), obj['center'],
-                                                                   obj['normal'], float(obj['radius']))
+            obj['velocity_profile'] = Problem.InputVelocityProfile(self.factor*float(obj['reference_coef']),
+                                                                   obj['center'], obj['normal'], float(obj['radius']))
 
     class InputVelocityProfile(Expression):
         def __init__(self, factor, center, normal, radius, **kwargs):
-            # super(Expression, self).__init__()
-            #super(Problem.InputVelocityProfile, self).__init__(**kwargs)
             self.t = 0.
             self.onset_factor = 1.
             self.factor = factor
@@ -139,7 +140,7 @@ class Problem(gp.GeneralProblem):
             rad = float(sqrt(x_dist2+y_dist2+z_dist2))
             # do not evaluate on boundaries or outside of circle:
             velocity = 0 if near(rad, self.radius) or rad > self.radius else \
-                2.*self.onset_factor*self.factor*Problem.v_function(self.t)*(1.0 - rad*rad/(self.radius*self.radius))   # QQ je centerline 2*prumerna?
+                2.*self.onset_factor*self.factor*Problem.v_function(self.t)*(1.0 - rad*rad/(self.radius*self.radius))
             value[0] = velocity * self.normal[0]
             value[1] = velocity * self.normal[1]
             value[2] = velocity * self.normal[2]
@@ -147,21 +148,18 @@ class Problem(gp.GeneralProblem):
         def value_shape(self):
             return (3,)
 
-    # jde o prumernou rychlost, nikoliv centerline
+    # polynomial defining average inflow velocity
     @staticmethod
     def v_function(tt):
         # nejprve zadavane casti
-        T = 1.0  # velikost jedne periody v s
-        v_m = 300  # min.rychlost
-        v_M = 800  # max.rychlost
+        T = 1.0  # Period length
+        v_m = 300  # min. velocity
+        v_M = 800  # max. velocity
 
-        # pocitane koeficienty pro funkce
         a_1 = (-36)*(v_M-v_m)/T/T
         a_2 = (-12)*(v_M-v_m)/T/T
         a_3 = 3*(v_M-v_m)/T/T
-        # a_4=-a_3;
 
-        # vysledky funkce
         t = tt % T
         if t < T / 6.0:
             return v_M + (a_1*(t-(T/6.0))*(t-(T/6.0)))
@@ -174,8 +172,7 @@ class Problem(gp.GeneralProblem):
 
     def get_boundary_conditions(self, use_pressure_BC, v_space, p_space):
         # boundary parts: 1 walls, inflows and outflows specified in [meshName].ini file
-        # Boundary conditions
-        bc0 = DirichletBC(v_space, (0.0, 0.0, 0.0), self.facet_function, 1)
+        bc0 = DirichletBC(v_space, (0.0, 0.0, 0.0), self.facet_function, 1)   # no-slip
         bcu = [bc0]
         for obj in self.inflows:
             bcu.append(DirichletBC(v_space, obj['velocity_profile'], self.facet_function, int(obj['number'])))
@@ -189,22 +186,16 @@ class Problem(gp.GeneralProblem):
         out = []
         for d in function_list:
             if d['type'] == 'v':
-                f = Function(self.vSpace)
+                f = Function(self.vSpace)  # zero velocity
             if d['type'] == 'p':
-                f = Function(self.pSpace)
+                f = Function(self.pSpace)  # zero pressure
             out.append(f)
         return out
 
     def update_time(self, actual_time, step_number):
         super(Problem, self).update_time(actual_time, step_number)
-        if self.actual_time > 0.5 and int(round(self.actual_time * 1000)) % 1000 == 0:
-            self.isWholeSecond = True
-            seconds = int(round(self.actual_time))
-            self.second_list.append(seconds)
-            self.N1 = seconds*self.stepsInSecond
-            self.N0 = (seconds-1)*self.stepsInSecond
-        else:
-            self.isWholeSecond = False
+        if self.actual_time > 0.5 and abs(math.modf(actual_time)[0]) < 0.5*self.metadata['dt']:
+            self.second_list.append(int(round(self.actual_time)))
 
         # Update boundary condition
         self.tc.start('updateBC')

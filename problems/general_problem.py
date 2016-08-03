@@ -369,11 +369,8 @@ class GeneralProblem(object):
 
     def compute_div(self, is_tent, velocity):
         self.tc.start('divNorm')
-        div_list = list(self.listDict['d2' if is_tent else 'd']['list'])
+        div_list = self.listDict['d2' if is_tent else 'd']['list']
         div_list.append(norm(velocity, 'Hdiv0'))
-        if self.isWholeSecond:
-            list(self.listDict['d2' if is_tent else 'd']['slist']).append(
-                sum([i*i for i in div_list[self.N0:self.N1]])/self.stepsInSecond)
         self.tc.end('divNorm')
 
     # method for saving velocity (ensuring, that it will be one time line in ParaView)
@@ -386,8 +383,8 @@ class GeneralProblem(object):
 
     def compute_err(self, is_tent, velocity, t):
         if self.doErrControl:
-            er_list_L2 = list(self.listDict['u2L2' if is_tent else 'u_L2']['list'])
-            er_list_H1 = list(self.listDict['u2H1' if is_tent else 'u_H1']['list'])
+            er_list_L2 = self.listDict['u2L2' if is_tent else 'u_L2']['list']
+            er_list_H1 = self.listDict['u2H1' if is_tent else 'u_H1']['list']
             self.tc.start('errorV')
             # assemble is faster than errornorm
             errorL2_sq = assemble(inner(velocity - self.solution, velocity - self.solution) * dx)
@@ -403,17 +400,12 @@ class GeneralProblem(object):
             er_list_H1.append(errorH1)
             self.tc.end('errorV')
             if self.testErrControl:
-                er_list_test_H1 = list(self.listDict['u2H1test' if is_tent else 'u_H1test']['list'])
-                er_list_test_L2 = list(self.listDict['u2L2test' if is_tent else 'u_L2test']['list'])
+                er_list_test_H1 = self.listDict['u2H1test' if is_tent else 'u_H1test']['list']
+                er_list_test_L2 = self.listDict['u2L2test' if is_tent else 'u_L2test']['list']
                 self.tc.start('errorVtest')
                 er_list_test_L2.append(errornorm(velocity, self.solution, norm_type='L2', degree_rise=0))
                 er_list_test_H1.append(errornorm(velocity, self.solution, norm_type='H1', degree_rise=0))
                 self.tc.end('errorVtest')
-            if self.isWholeSecond:
-                list(self.listDict['u2L2' if is_tent else 'u_L2']['slist']).append(
-                    sqrt(sum([i*i for i in er_list_L2[self.N0:self.N1]])/self.stepsInSecond))
-                list(self.listDict['u2H1' if is_tent else 'u_H1']['slist']).append(
-                    sqrt(sum([i*i for i in er_list_H1[self.N0:self.N1]])/self.stepsInSecond))
             # stopping criteria for detecting diverging solution
             if self.last_error > self.divergence_treshold:
                 raise RuntimeError('STOPPED: Failed divergence test!')
@@ -595,7 +587,8 @@ class GeneralProblem(object):
             report_writer = csv.writer(reportFile, delimiter=';', escapechar='\\', quoting=csv.QUOTE_NONE)
             # report_writer.writerow(self.problem.get_metadata_to_save())
             report_writer.writerow(["name", "what", "time"] + self.time_list)
-            for key in self.listDict:
+            keys = sorted(self.listDict.keys())
+            for key in keys:
                 l = self.listDict[key]
                 if l['list']:
                     abrev = l['abrev']
@@ -621,20 +614,26 @@ class GeneralProblem(object):
         if self.second_list:
             with open(self.str_dir_name + "/report_seconds.csv", 'w') as reportFile:
                 report_writer = csv.writer(reportFile, delimiter=';', escapechar='|', quoting=csv.QUOTE_NONE)
-                # report_writer.writerow(self.problem.get_metadata_to_save())
                 report_writer.writerow(["name", "what", "time"] + self.second_list)
-                for key in self.listDict.iterkeys():
+                keys = sorted(self.listDict.keys())
+                for key in keys:
                     l = self.listDict[key]
-                    if 'slist' in l:
+                    if 'slist' in l and l['list']:
                         abrev = l['abrev']
-                        value = l['slist']
-                        report_writer.writerow([md['name'], l['name'], abrev] + value)
+                        values = l['slist']
+                        # generate averages over seconds from list
+                        for sec in self.second_list:
+                            N0 = (sec-1)*self.stepsInSecond
+                            N1 = sec*self.stepsInSecond
+                            values.append(sqrt(sum([i*i for i in l['list'][N0:N1]])/float(self.stepsInSecond)))
+
+                        report_writer.writerow([md['name'], l['name'], abrev] + values)
                         if 'scale' in l:
-                            temp_list = [i/l['scale'][0] for i in value]
+                            temp_list = [i/l['scale'][0] for i in values]
                             report_writer.writerow([md['name'], "scaled " + l['name'], abrev+"s"] + temp_list)
                         if 'norm' in l:
                             if l['norm']:
-                                temp_list = [i/l['norm'][0] for i in value]
+                                temp_list = [i/l['norm'][0] for i in values]
                                 l['normalized_list_sec'] = temp_list
                                 report_writer.writerow([md['name'], "normalized " + l['name'], abrev+"n"] + temp_list)
                             else:
@@ -642,11 +641,9 @@ class GeneralProblem(object):
                                 l['normalized_list_sec'] = []
                         if 'relative_list' in l:
                             temp_list = []
-                            # info('relative second list of'+ str(l['abrev']))
                             for sec in self.second_list:
                                 N0 = (sec-1)*self.stepsInSecond
                                 N1 = sec*self.stepsInSecond
-                                # info([sec,  N0, N1])
                                 temp_list.append(sqrt(sum([i*i for i in l['relative_list'][N0:N1]])/float(self.stepsInSecond)))
                             l['relative_list_sec'] = temp_list
                             report_writer.writerow([md['name'], "relative " + l['name'], abrev+"r"] + temp_list)

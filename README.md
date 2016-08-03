@@ -62,11 +62,13 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 |argument|option/value|explanation|
 |:---|:---|:---|
 |--nu|positive float|kinematic viscosity (default 3.71 mm<sup>2</sup>/s)|
+|-F|positive float|inflow velocity multiplicative factor|
 ### For "womersley_cylinder" problem
 |argument|option/value|explanation|
 |:---|:---|:---|
 |--nufactor|10.0, 1.0, 0.1 or 0.01|multiplicative factor for kinematic viscosity (default 1.0 value corresponds to 3.71 mm<sup>2</sup>/s)|
 |-e|"doEC" (default)/"noEC"|do or do not compute error using analytic solution|
+|-F|positive float|inflow velocity multiplicative factor|
 
 ### For IPCS solver
 
@@ -82,5 +84,6 @@ Computed results are stored in XDMF files. To open them you can use the [ParaVie
 
 Scripts for convenient visualisation in ParaView are generated after each successful run. The scripts should work well with ParaView version 4.4. For the scripts to work properly, you should open ParaView from the same directory as the folder with results is located (the scripts use relative paths fo XDMF files). To use them, go to menu Tools/Python Shell and then click 'Run Script'.
 
-
+# Adding new meshes to be used with "real" problem
+You will need mesh in XML format, normals and centerpoints for every outflow and inflow and radii of inscribed circles for the inflows. Then prepare_real_mesh.py can be used to generate .hdf5 and .ini files containing mesh, facet function and information used in generating inflow profiles.
 

@@ -14,10 +14,11 @@ meshName = 'HYK3'
 # INPUT DATA ============================
 # OLD input data at the end of a file
 # reference radius is used to compute reference_coef to multiply inflow velocity to get same volume flow as in reference
+# (for comparing different meshes of the same geometry)
 # data are stored into [meshName].ini file to be used for parabolic inflow profile generation
 
-# should work for any number of inflows and outflows as longe any two are not in same plane
-# planes can intersect rest of the geometry, as is improbable that any exterior facet will have all vertices in given planes
+# should work for any number of inflows and outflows as long any two are not in same plane
+# planes can intersect the geometry, as is improbable that any exterior facet will have all vertices in given planes
 # otherwise it would be necessary to check distance from centerpoint
 inflows = [
     {'number': 2, 'normal': [0.0, 1.0, 0.0], 'center': [6.40697, 0.344021, 13.8723], 'radius': 1.10057,

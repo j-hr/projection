@@ -6,6 +6,8 @@ from dolfin.cpp.mesh import Mesh, MeshFunction
 from ufl import Measure, dx, cos, sin, FacetNormal, inner, grad, outer, Identity, sym
 from math import pi, sqrt
 
+import math
+
 from problems import general_problem as gp
 import womersleyBC
 print('Imported womersley_cylinder problem.')
@@ -164,14 +166,8 @@ class Problem(gp.GeneralProblem):
 
     def update_time(self, actual_time, step_number):
         super(Problem, self).update_time(actual_time, step_number)
-        if self.actual_time > 0.5 and int(round(self.actual_time * 1000)) % 1000 == 0:
-            self.isWholeSecond = True
-            seconds = int(round(self.actual_time))
-            self.second_list.append(seconds)
-            self.N1 = seconds*self.stepsInSecond
-            self.N0 = (seconds-1)*self.stepsInSecond
-        else:
-            self.isWholeSecond = False
+        if self.actual_time > 0.5 and abs(math.modf(actual_time)[0]) < 0.5*self.metadata['dt']:
+            self.second_list.append(int(round(self.actual_time)))
 
         self.solution = self.assemble_solution(self.actual_time)
 
@@ -234,9 +230,6 @@ class Problem(gp.GeneralProblem):
                                      inner(velocity - self.solution, velocity - self.solution)) * self.dsWall))
         er_list_H1w.append(errorH1wall)
         print('  Relative H1wall error:', errorH1wall / self.analytic_v_norm_H1w)
-        if self.isWholeSecond:
-            self.listDict['u2H1w' if is_tent else 'u_H1w']['slist'].append(
-                sqrt(sum([i*i for i in er_list_H1w[self.N0:self.N1]])/self.stepsInSecond))
 
     def compute_functionals(self, velocity, pressure, t, step):
         super(Problem, self).compute_functionals(velocity, pressure, t, step)
@@ -271,9 +264,6 @@ class Problem(gp.GeneralProblem):
         self.listDict['force_wall']['list'].append(error_force)
         self.listDict['force_wall_normal']['list'].append(error_f_normal)
         self.listDict['force_wall_shear']['list'].append(error_f_shear)
-        if self.isWholeSecond:
-            self.listDict['force_wall']['slist'].append(
-                sqrt(sum([i*i for i in self.listDict['force_wall']['list'][self.N0:self.N1]])/self.stepsInSecond))
         print('  Relative force error:', error_force/an_force)
         self.tc.end('errorForce')
 
@@ -301,10 +291,6 @@ class Problem(gp.GeneralProblem):
             self.listDict['apg']['list'].append(analytic_gradient)
         self.listDict['pgE2' if is_tent else 'pgE']['list'].append(computed_gradient-analytic_gradient)
         self.listDict['pgEA2' if is_tent else 'pgEA']['list'].append(abs(computed_gradient-analytic_gradient))
-        if self.isWholeSecond:
-            for key in (['pgE2', 'p2'] if is_tent else ['pgE', 'p']):
-                self.listDict[key]['slist'].append(
-                    sqrt(sum([i*i for i in self.listDict[key]['list'][self.N0:self.N1]])/self.stepsInSecond))
         self.tc.end('errorP')
         if self.doSaveDiff:
             sol_pg_expr = Expression(("0", "0", "pg"), pg=analytic_gradient / self.pg_normalization_factor[0])
