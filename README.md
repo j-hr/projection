@@ -16,6 +16,7 @@ The test problem cannot be run in parallel due to the technique of generating an
 
 ## Basic usage
 The code is operated using command line arguments. Basic structure is:
+
     python main.py problem_name solver_name mesh total_time time_step
 
 |argument|option/value|explanation|
@@ -45,8 +46,12 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 |--onset|float|smoothing of boundary condition time span (default 0.5 s)|
 |--saventh|positive integer|save velocity, pressure etc. only in every n-th step during first second|
 |--ST|"peak"|saves XDMF files only in the second tenth of each second|
-| |"min"|"min" saves only up to ten steps around peak
+| |"min"|saves only few steps around peak flow|
 | | |Both options do not save anything during first second, overrides --saventh.|
+|--wss|all|compute wall shear stress in every time step|
+| |peak|compute wall shear stress in few steps around peak flow|
+|--wss_method|"integral" (default)|computes WSS norm averaged over facets|
+| |"expression"|computes WSS vector and norm, does not work for higher number of cores|
 |--ffc| |FEniCS form compiler options and optimizations|
 | |'uflacs_opt' (default)|takes longer to compile but result in more efficient code|
 | |'auto_opt'|alternative to 'uflacs_opt'|

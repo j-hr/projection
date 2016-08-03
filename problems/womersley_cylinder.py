@@ -58,7 +58,7 @@ class Problem(gp.GeneralProblem):
         self.area = None
 
         choose_note = {1.0: '', 0.1: 'nuL10', 0.01: 'nuL100', 10.0: 'nuH10'}
-        self.precomputed_filename = args.mesh + choose_note[self.nu_factor]
+        self.precomputed_filename = args.mesh + choose_note[self.args.nufactor]
         print('chosen filename for precomputed solution', self.precomputed_filename)
 
         # partial Bessel functions and coefficients
@@ -101,7 +101,7 @@ class Problem(gp.GeneralProblem):
 
         print("IC type: " + self.ic)
         print("Velocity scale factor = %4.2f" % self.factor)
-        reynolds = 728.761 * self.factor  # TODO modify by nu_factor
+        reynolds = 728.761 * self.factor / self.args.nufactor
         print("Computing with Re = %f" % reynolds)
 
         self.v_in = Function(V)

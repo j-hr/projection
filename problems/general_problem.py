@@ -5,9 +5,9 @@ from dolfin import Function, TestFunction, assemble, interpolate, Expression, pr
     FunctionSpace, VectorFunctionSpace
 from dolfin.cpp.common import mpi_comm_world, toc, MPI, info, begin, end
 from dolfin.cpp.io import XDMFFile, HDF5File
-from dolfin.cpp.mesh import Mesh, MeshFunction, SubMesh, BoundaryMesh, Cell
+from dolfin.cpp.mesh import Mesh, MeshFunction, SubMesh, BoundaryMesh, Cell, facets, FacetFunction
 from ufl import dx, div, inner, grad, sym, transpose, sqrt as sqrt_ufl, Identity, FacetNormal, dot, \
-    FacetArea, ds, as_vector
+    FacetArea, ds, as_vector, Measure
 from math import sqrt, pi, cos, modf
 import numpy as np
 
@@ -99,7 +99,6 @@ class GeneralProblem(object):
         self.VDG = None
         self.R = None
         self.SDG = None
-        self.SCG = None
         self.nb = None
         self.peak_time_steps = None
 
@@ -120,7 +119,6 @@ class GeneralProblem(object):
         #                          'pg2D': {'name': 'pressure_grad_tent_diff'}}
         self.fileDictWSS = {'wss': {'name': 'wss'}, }
         self.fileDictWSSnorm = {'wss_norm': {'name': 'wss_norm'}, }
-        self.fileDictWSSnormCG = {'wss_norm_CG': {'name': 'wss_norm_CG'}, }
         self.fileDictDebugRot = {'grad_cor': {'name': 'grad_cor'}, }
 
         # lists of functionals and other scalar output data
@@ -233,15 +231,27 @@ class GeneralProblem(object):
         #   diff: save also difference vel-sol
         #   noSave: do not create .xdmf files with velocity, pressure, divergence
         parser.add_argument('--saventh', help='save only n-th step in first cycle', type=int, default=1)
-        parser.add_argument('--ST', help='save only n-th step in first cycle', choices=['min', 'peak', 'no_restriction'], default='no_restriction')
+        parser.add_argument('--ST', help='save only n-th step in first cycle',
+                            choices=['min', 'peak', 'no_restriction'], default='no_restriction')
         # stronger than --saventh, to be used instead of it
         parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.5)
-        # IMP stopped here with parameter documentation
-        parser.add_argument('--wss_method', help='compute wall shear stress', choices=['expression', 'integral'], default='integral')
-        # expression does not work for too many processors (24 procs for 'HYK' is OK, 48 is too much)
         parser.add_argument('--wss', help='compute wall shear stress', choices=['none', 'all', 'peak'], default='none')
-        # NT to use wss -S must be at least only_vel (doSave must be True for wss work properly)
+        # --wss is independent of -S options
+        parser.add_argument('--wss_method', help='compute wall shear stress', choices=['expression', 'integral'],
+                            default='integral')
+        # 'expression' works with BoundaryMesh object. It restricts stress to boundary mesh and then computes CG,1
+        # vector WSS and its magnitude from values on boundary
+        # expression does not work for too many processors (24 procs for 'HYK' is OK, 48 is too much), because the case
+        # when some parallel process have no boundary mesh is not implemented in FEniCS
+        # 'integral' works always. It computes facet average wss norm using assemble() to integrate over boundary
+        #  facets. Results for each cell are stored in DG,0 scalar function (interior cells will have value 0, because
+        # only exterior facet integrals are computed)
+        # Note: it does not make sense to project the result into any other space, because zeros inside domain would
+        # interfere with values on boundary
+        # IMP stopped here with parameter documentation
         parser.add_argument('--debug_rot', help='save more information about rotation correction', action='store_true')
+        # idea was to save rotational correction contribution to velocity RHS
+        # NT results are not reliable. One would need to project nu*div(v) into Q space before computing gradient.
         parser.add_argument('-e', '--error', help='Error control mode', choices=['doEC', 'noEC', 'test'], default='doEC')
 
     @staticmethod
@@ -272,16 +282,14 @@ class GeneralProblem(object):
         self.divFunction = Function(D)
         self.pFunction = Function(Q)
 
-        if self.doSave:
-            # self.pgSpace = VectorFunctionSpace(mesh, "DG", 0)    # used to save pressure gradient as vectors
-            # self.pgFunction = Function(self.pgSpace)
-            self.initialize_xdmf_files()
+        # self.pgSpace = VectorFunctionSpace(mesh, "DG", 0)    # used to save pressure gradient as vectors
+        # self.pgFunction = Function(self.pgSpace)
+        self.initialize_xdmf_files()
         self.stepsInSecond = int(round(1.0 / self.metadata['dt']))
         info('stepsInSecond = %d' % self.stepsInSecond)
 
         if self.args.ST == 'min' or self.args.wss == 'peak':
             # 0.166... is peak for real problem, 0.188 is peak for womersley profile
-            # NT manualy written here:
             chosen_steps = [0.1, 0.125, 0.15, 0.16, 0.165, 0.166, 0.167, 0.17, 0.188, 0.189, 0.2]
             # select computed steps nearest to chosen steps:
             self.peak_time_steps = [int(round(chosen / self.metadata['dt'])) for chosen in chosen_steps]
@@ -290,8 +298,6 @@ class GeneralProblem(object):
 
         # IMP cleaning stopped here
         if self.args.wss != 'none':
-            # NT implemented in general_problem, but sensible only in womersley_cylinder and real
-            # but everything about wss is ommited as long one does not use --wss '...'
             self.tc.start('WSSinit')
             if self.args.wss_method == 'expression':
                 self.T = TensorFunctionSpace(self.mesh, 'Lagrange', 1)
@@ -311,7 +317,6 @@ class GeneralProblem(object):
 
             if self.args.wss_method == 'integral':
                 self.SDG = FunctionSpace(self.mesh, 'DG', 0)
-                self.SCG = FunctionSpace(self.mesh, 'CG', 1)
 
             self.tc.end('WSSinit')
 
@@ -321,22 +326,23 @@ class GeneralProblem(object):
         self.metadata['filename_base'] = self.problem_code + '_' + self.metadata['name']
 
         # assemble file dictionary
-        if self.doSaveDiff:
-            self.fileDict.update(self.fileDictDiff)
-        if self.metadata['hasTentativeV']:
-            self.fileDict.update(self.fileDictTent)
+        if self.doSave:
             if self.doSaveDiff:
-                self.fileDict.update(self.fileDictTentDiff)
-        if self.metadata['hasTentativeP']:
-            self.fileDict.update(self.fileDictTentP)
-            if self.doSaveDiff:
-                self.fileDict.update(self.fileDictTentPDiff)
+                self.fileDict.update(self.fileDictDiff)
+            if self.metadata['hasTentativeV']:
+                self.fileDict.update(self.fileDictTent)
+                if self.doSaveDiff:
+                    self.fileDict.update(self.fileDictTentDiff)
+            if self.metadata['hasTentativeP']:
+                self.fileDict.update(self.fileDictTentP)
+                if self.doSaveDiff:
+                    self.fileDict.update(self.fileDictTentPDiff)
+        else:
+            self.fileDict = {}
         if self.args.wss != 'none':
             self.fileDict.update(self.fileDictWSSnorm)
             if self.args.wss_method == 'expression':
                 self.fileDict.update(self.fileDictWSS)
-            if self.args.wss_method == 'integral':
-                self.fileDict.update(self.fileDictWSSnormCG)
         if self.args.debug_rot:
             self.fileDict.update(self.fileDictDebugRot)
         # create files
@@ -490,15 +496,18 @@ class GeneralProblem(object):
             return (3,)
 
     def compute_functionals(self, velocity, pressure, t, step):
-        if self.args.wss == 'all' or (step >= self.stepsInSecond and self.args.wss == 'peak' and ((step % self.stepsInSecond) in self.peak_time_steps)):
+        if self.args.wss == 'all' or \
+                (step >= self.stepsInSecond and self.args.wss == 'peak' and
+                 ((step % self.stepsInSecond) in self.peak_time_steps)):
             self.tc.start('WSS')
             begin('WSS (%dth step)' % step)
             if self.args.wss_method == 'expression':
                 stress = project(self.nu*2*sym(grad(velocity)), self.T)
-                stress.set_allow_extrapolation(True)
-                stress_b = interpolate(stress, self.Tb)
+                # pressure is not used as it contributes only to the normal component
+                stress.set_allow_extrapolation(True)   # need because of some inaccuracies in BoundaryMesh coordinates
+                stress_b = interpolate(stress, self.Tb)    # restrict stress to boundary mesh
                 # self.fileDict['stress']['file'] << (stress_b, self.actual_time)
-                info('Saved stress tensor')
+                # info('Saved stress tensor')
                 info('Computing WSS')
                 wss = dot(stress_b, self.nb) - inner(dot(stress_b, self.nb), self.nb)*self.nb
                 wss_func = project(wss, self.Vb)
@@ -508,18 +517,16 @@ class GeneralProblem(object):
                 self.fileDict['wss_norm']['file'] << (wss_norm, self.actual_time)
             if self.args.wss_method == 'integral':
                 wss_norm = Function(self.SDG)
-                wss_norm_CG = Function(self.SCG)
                 mS = TestFunction(self.SDG)
                 scaling = 1/FacetArea(self.mesh)
                 stress = self.nu*2*sym(grad(velocity))
                 wss = dot(stress, self.normal) - inner(dot(stress, self.normal), self.normal)*self.normal
-                wss_norm_form = scaling*mS*sqrt_ufl(inner(wss, wss))*ds
+                wss_norm_form = scaling*mS*sqrt_ufl(inner(wss, wss))*ds   # ds is integral over exterior facets only
                 assemble(wss_norm_form, tensor=wss_norm.vector())
                 self.fileDict['wss_norm']['file'] << (wss_norm, self.actual_time)
-                wss_norm_CG.assign(project(wss_norm, self.SCG))
-                self.fileDict['wss_norm_CG']['file'] << (wss_norm_CG, self.actual_time)
 
-                # NT this works, but it is hard to display in ParaView (DG,1)-vector space across exterior facet centers
+                # to get vector WSS values:
+                # NT this works, but in ParaView for (DG,1)-vector space glyphs are displayed in cell centers
                 # wss_vector = []
                 # for i in range(3):
                 #     wss_component = Function(self.SDG)
