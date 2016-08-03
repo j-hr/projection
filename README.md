@@ -65,7 +65,8 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 ### For "womersley_cylinder" problem
 |argument|option/value|explanation|
 |:---|:---|:---|
-|--nufactor|10.0, 1.0, 0.1 or 0.01|multiplicative factor for kinematic viscosity (default 1.0 value corresponds to viscosity 3.71 mm<sup>2</sup>/s)|
+|--nufactor|10.0, 1.0, 0.1 or 0.01|multiplicative factor for kinematic viscosity (default 1.0 value corresponds to 3.71 mm<sup>2</sup>/s)|
+|-e|"doEC" (default)/"noEC"|do or do not compute error using analytic solution|
 
 ### For IPCS solver
 
