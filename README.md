@@ -112,5 +112,5 @@ Computed results are stored in XDMF files. To open them you can use the [ParaVie
 Scripts for convenient visualisation in ParaView are generated after each successful run. The scripts should work well with ParaView version 4.4. For the scripts to work properly, you should open ParaView from the same directory as the folder with results is located (the scripts use relative paths fo XDMF files). To use them, go to menu Tools/Python Shell and then click 'Run Script'.
 
 # Adding new meshes to be used with "real" problem
-You will need mesh in XML format, normals and centerpoints for every outflow and inflow and radii of inscribed circles for the inflows. Then prepare_real_mesh.py can be used to generate .hdf5 and .ini files containing mesh, facet function and information used in generating inflow profiles.
+You will need mesh in XML format, normals and centerpoints for every outflow and inflow and radii of inscribed circles for the inflows. Then prepare_real_mesh.py can be used to generate .hdf5 and .ini files containing mesh, facet function and information used for generating inflow profiles.
 
