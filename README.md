@@ -72,6 +72,34 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 |--ic|"zero"|use zero initial conditions|
 | |"correct"|use analytic solution as initial conditions|
 ### For IPCS solver
+|argument|option/value|explanation|
+|:---|:---|:---|
+|--stab|positive float|use stabilisation with chosen multiplicative coefficient|
+|--cbc_tau| |use simpler stabilisation parameter|
+|--cs| |use "consistent" full SUPG stabilisation (requires --stab)|
+|-r| |use rotational pressure correction|
+|-B| |do not use BC for corrected velocity|
+|-b|"outflow" (default)|use zero pressure boundary condition on outflow|
+| |"nullspace"|compute singular (full Neumann) Poisson problem for pressure|
+|--fo| |force right outflow rate by prescribing constant pressure gradient on outflows (for -b "nullspace", "real" problem)|
+|--laplace| |use Navier-Stokes formulation with laplace(u) instead of 2sym(grad(u))|
+|--bcv| |use alternative velocity outflow condition (default "CDN" is sym(grad(u))n = 0)|
+| |LAP|grad(u)n = 0|
+| |DDN|directional do-nothing condition (for the case of backflow instability) (requires uflacs compiler)|
+### For IPCS solver - solver options
+|argument|option/value|explanation|
+|:---|:---|:---|
+|--solP|solver code (default: "cg")|solver used for 2nd step|
+|--precP|"hypre_amg", "ilu", "sor" (default)|preconditioner used for 2nd step|
+|--precV|preconditioner code, (default: "sor")|preconditioner used for 1st step|
+|--precVC|preconditioner code, (default: "sor")|preconditioner used for 3rd step|
+|--prv1|integer I, (default: 6)|1st step Krylov solver relative precision = 1E-I|
+|--pav1|integer I, (default: 10)|1st step Krylov solver absolute precision = 1E-I|
+|--pap'|integer I, (default: 6)|2nd step Krylov solver absolute precision = 1E-I|
+|--prp'|integer I, (default: 10)|2nd step Krylov solver relative precision = 1E-I|
+|--Vrestart|positive integer|set GMRES restart parameter for 1st step|
+|--Prestart|positive integer|set GMRES restart parameter for 2nd step|
+|-s|"direct"|use only direct solvers|
 
 ### For direct solver
 

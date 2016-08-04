@@ -1,14 +1,11 @@
 from __future__ import print_function
-from dolfin import Function, VectorFunctionSpace, FunctionSpace, assemble, Expression, CellSize, DOLFIN_EPS, parameters, \
-    plot, project, DirichletBC
-from dolfin.cpp.common import info, begin, end
-from dolfin.cpp.function import FunctionAssigner
-from dolfin.cpp.la import LUSolver, KrylovSolver, as_backend_type, VectorSpaceBasis, Vector, PETScKrylovSolver, \
-    PETScOptions
-from dolfin.functions import TrialFunction, TestFunction, Constant, FacetNormal
-from sympy.core.compatibility import u_decode
-from ufl import dot, dx, grad, system, div, inner, sym, Identity, transpose, nabla_grad, sqrt, min_value
 
+from dolfin import Function, VectorFunctionSpace, FunctionSpace, assemble, CellSize, DOLFIN_EPS, parameters, \
+    project
+from dolfin.cpp.common import info, begin, end
+from dolfin.cpp.la import LUSolver, KrylovSolver, as_backend_type, VectorSpaceBasis, Vector
+from dolfin.functions import TrialFunction, TestFunction, Constant, FacetNormal
+from ufl import dot, dx, grad, system, div, inner, sym, Identity, sqrt, min_value
 import general_solver as gs
 
 
@@ -24,7 +21,6 @@ class Solver(gs.GeneralSolver):
         self.null_space = None
 
         # input parameters
-        self.bc = args.bc
         self.forceOutflow = args.fo
         self.useLaplace = args.laplace
         self.use_full_SUPG = args.cs
@@ -48,12 +44,6 @@ class Solver(gs.GeneralSolver):
         self.useRotationScheme = args.r
         self.metadata['hasTentativeP'] = self.useRotationScheme
 
-        self.B = args.B
-        self.use_ema = args.ema
-        self.cbcDelta = args.cbcDelta
-        self.precision_rel_v_tent = args.prv1
-        self.precision_abs_v_tent = args.pav1
-
     def __str__(self):
         return 'ipcs1 - incremental pressure correction scheme with nonlinearity treated by Adam-Bashword + ' \
                'Crank-Nicolson and viscosity term treated semi-explicitly (Crank-Nicholson)'
@@ -61,35 +51,36 @@ class Solver(gs.GeneralSolver):
     @staticmethod
     def setup_parser_options(parser):
         gs.GeneralSolver.setup_parser_options(parser)
+        parser.add_argument('--stab', help='Use stabilization (positive constant)', type=float, default=0.)
+        parser.add_argument('--cs', help='Use consistent SUPG stabilisation.', action='store_true')
+        parser.add_argument('--cbc_tau', help='Use simpler cbcflow parameter for SUPG', action='store_true')
+        parser.add_argument('-r', help='Use rotation scheme', action='store_true')
+        parser.add_argument('-B', help='Use no BC in correction step', action='store_true')
         parser.add_argument('-s', '--solvers', help='Solvers', choices=['direct', 'krylov'], default='krylov')
+        parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
+                            choices=['outflow', 'nullspace'], default='outflow')
+        # 'outflow' should be used with direct solvers (cannot LU-decompose singular matrix)
         parser.add_argument('--prv1', help='relative tentative velocity Krylov solver precision', type=int, default=6)
         parser.add_argument('--pav1', help='absolute tentative velocity Krylov solver precision', type=int, default=10)
         parser.add_argument('--pap', help='pressure Krylov solver absolute precision', type=int, default=6)
         parser.add_argument('--prp', help='pressure Krylov solver relative precision', type=int, default=10)
-        parser.add_argument('-b', '--bc', help='Pressure boundary condition mode',
-                            choices=['outflow', 'nullspace'], default='outflow')
         parser.add_argument('--precV', help='Preconditioner for tentative velocity GMRES solver', type=str, default='sor')
         parser.add_argument('--precVC', help='Preconditioner for corrected velocity CG solver', type=str, default='sor')
-        parser.add_argument('--precP', help='Preconditioner for 2nd step solver (Poisson)', choices=['hypre_amg', 'ilu', 'sor'],
-                            default='sor')
-        parser.add_argument('--solP', help='2nd step solver (Poisson)', choices=['cg', 'gmres', 'richardson', 'tfqmr'],
-                            default='cg')
+        parser.add_argument('--precP', help='Preconditioner for 2nd step solver (Poisson)',
+                            choices=['hypre_amg', 'ilu', 'sor'], default='sor')
+        parser.add_argument('--solP', help='2nd step solver (Poisson)', type=str, default='cg')
+        # choices=['cg', 'gmres', 'richardson', 'tfqmr', ...]
         parser.add_argument('--Prestart', help='2nd step solver GMRES restart', type=int, default=-1)
         parser.add_argument('--Vrestart', help='1st step solver GMRES restart', type=int, default=-1)
-        parser.add_argument('-r', help='Use rotation scheme', action='store_true')
-        parser.add_argument('-B', help='Use no BC in correction step', action='store_true')
         parser.add_argument('--fo', help='Force Neumann outflow boundary for pressure', action='store_true')
         parser.add_argument('--laplace', help='Use laplace(u) instead of div(symgrad(u))', action='store_true')
-        parser.add_argument('--stab', help='Use stabilization (positive constant)', type=float, default=0.)
-        parser.add_argument('--bcv', help='Oufflow BC for velocity (with stress formulation)',
+        parser.add_argument('--bcv', help='Outflow BC for velocity (with stress formulation)',
                             choices=['CDN', 'DDN', 'LAP'], default='CDN')
         parser.add_argument('--ema', help='Use EMA conserving scheme for convection term', action='store_true')
         # described in Charnyi, Heister, Olshanskii, Rebholz:
         # "On conservation laws of Navier-Stokes Galerkin discretizations" (2016)
         # it seems that it does not work with projection methods (probably because of dropping div u = 0 constraint)
-        parser.add_argument('--cs', help='Use consistent SUPG stabilisation.', action='store_true')
-        parser.add_argument('--cbcDelta', help='Use simpler cbcflow parameter for SUPG', action='store_true')
-        parser.add_argument('--cod', help='Use corrected parameter for SUPG', action='store_true')
+        # not documented in readme
 
     def solve(self, problem):
         self.problem = problem
@@ -99,10 +90,8 @@ class Solver(gs.GeneralSolver):
         dt = self.metadata['dt']
 
         nu = Constant(self.problem.nu)
-        # TODO check proper use of watches
         self.tc.init_watch('init', 'Initialization', True, count_to_percent=False)
         self.tc.init_watch('rhs', 'Assembled right hand side', True, count_to_percent=True)
-        self.tc.init_watch('updateBC', 'Updated velocity BC', True, count_to_percent=True)
         self.tc.init_watch('applybc1', 'Applied velocity BC 1st step', True, count_to_percent=True)
         self.tc.init_watch('applybc3', 'Applied velocity BC 3rd step', True, count_to_percent=True)
         self.tc.init_watch('applybcP', 'Applied pressure BC or othogonalized rhs', True, count_to_percent=True)
@@ -141,11 +130,6 @@ class Solver(gs.GeneralSolver):
                                                           {'type': 'v', 'time': 0.0},
                                                           {'type': 'p', 'time': 0.0}])
 
-        # save used initial conditions
-        # if doSave:
-        #     problem.save_vel(False, u0)
-        #     problem.save_vel(True, u0)
-
         u_ = Function(self.V)         # current tentative velocity
         u_cor = Function(self.V)         # current corrected velocity
         p_ = Function(self.Q)         # current pressure or pressure help function from rotation scheme
@@ -161,25 +145,24 @@ class Solver(gs.GeneralSolver):
 
         # Stabilisation
         h = CellSize(mesh)
-        # CBC delta:
-        if self.cbcDelta:
-            delta = Constant(self.stabCoef)*h/(sqrt(inner(u_ext, u_ext))+h)
-        elif self.args.cod:
-            delta = Constant(self.stabCoef)*k*h**2/(2*nu*k + k*h*sqrt(DOLFIN_EPS + inner(u_ext, u_ext))+h**2)
+        if self.args.cbc_tau:
+            # used in Simula cbcflow project
+            tau = Constant(self.stabCoef)*h/(sqrt(inner(u_ext, u_ext))+h)
         else:
-            delta = Constant(self.stabCoef)*h**2/(2*nu*k + k*h*inner(u_ext, u_ext)+h**2)
+            # proposed in R. Codina: On stabilized finite element methods for linear systems of
+            # convection-diffusion-reaction equations.
+            tau = Constant(self.stabCoef)*k*h**2/(2*nu*k + k*h*sqrt(DOLFIN_EPS + inner(u_ext, u_ext))+h**2)
+            # DOLFIN_EPS is added because of FEniCS bug that inner(u_ext, u_ext) can be negative when u_ext = 0
 
         if self.use_full_SUPG:
-            v1 = v + delta*0.5*dot(grad(v), u_ext)
+            v1 = v + tau*0.5*dot(grad(v), u_ext)
             parameters['form_compiler']['quadrature_degree'] = 6
         else:
             v1 = v
 
         def nonlinearity(function):
-            if self.use_ema:
-               return 2*inner(dot(sym(grad(function)), u_ext), v1) * dx + inner(div(function)*u_ext, v1) * dx
-                # return 2*inner(dot(sym(grad(function)), u_ext), v) * dx + inner(div(u_ext)*function, v) * dx
-                # QQ implement this way?
+            if self.args.ema:
+                return 2*inner(dot(sym(grad(function)), u_ext), v1) * dx + inner(div(function)*u_ext, v1) * dx
             else:
                 return inner(dot(grad(function), u_ext), v1) * dx
 
@@ -201,12 +184,12 @@ class Solver(gs.GeneralSolver):
         a1_const = (1./k)*inner(u, v1)*dx + diffusion(0.5*u)
         a1_change = nonlinearity(0.5*u)
         if self.bcv == 'DDN':
-            # IMP Problem: Does not penalize influx for current step, only for the next one
-            # IMP this can lead to oscilation:
+            # does not penalize influx for current step, only for the next one
+            # this can lead to oscilation:
             # DDN correct next step, but then u_ext is OK so in next step DDN is not used, leading to new influx...
             # u and u_ext cannot be switched, min_value is nonlinear function
             a1_change += -0.5*min_value(Constant(0.), inner(u_ext, n))*inner(u, v1)*problem.get_outflow_measure_form()
-            # IMP works only with uflacs compiler
+            # NT works only with uflacs compiler
 
         L1 = (1./k)*inner(u0, v1)*dx - nonlinearity(0.5*u0) - diffusion(0.5*u0) + pressure_rhs()
         if self.bcv == 'DDN':
@@ -214,10 +197,10 @@ class Solver(gs.GeneralSolver):
 
         # Non-consistent SUPG stabilisation
         if self.stabilize and not self.use_full_SUPG:
-            # a1_stab = delta*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx
-            a1_stab = 0.5*delta*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx(None, {'quadrature_degree': 6})
-            # NT optional: use Crank Nicolson in stabilisation term: change RHS
-            # L1 += -0.5*delta*inner(dot(grad(u0), u_ext), dot(grad(v), u_ext))*dx(None, {'quadrature_degree': 6})
+            # a1_stab = tau*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx
+            a1_stab = 0.5*tau*inner(dot(grad(u), u_ext), dot(grad(v), u_ext))*dx(None, {'quadrature_degree': 6})
+            # optional: to use Crank Nicolson in stabilisation term following change of RHS is needed:
+            # L1 += -0.5*tau*inner(dot(grad(u0), u_ext), dot(grad(v), u_ext))*dx(None, {'quadrature_degree': 6})
 
         outflow_area = Constant(problem.outflow_area)
         need_outflow = Constant(0.0)
@@ -250,10 +233,10 @@ class Solver(gs.GeneralSolver):
 
         # Assemble matrices
         self.tc.start('assembleMatrices')
-        A1_const = assemble(a1_const)  # need to be here, so A1 stays one Python object during repeated assembly
-        A1_change = A1_const.copy()  # copy to get matrix with same sparse structure (data will be overwriten)
+        A1_const = assemble(a1_const)  # must be here, so A1 stays one Python object during repeated assembly
+        A1_change = A1_const.copy()  # copy to get matrix with same sparse structure (data will be overwritten)
         if self.stabilize and not self.use_full_SUPG:
-            A1_stab = A1_const.copy()  # copy to get matrix with same sparse structure (data will be overwriten)
+            A1_stab = A1_const.copy()  # copy to get matrix with same sparse structure (data will be overwritten)
         A2 = assemble(a2)
         A3 = assemble(a3)
         if self.useRotationScheme:
@@ -263,9 +246,9 @@ class Solver(gs.GeneralSolver):
         if self.solvers == 'direct':
             self.solver_vel_tent = LUSolver('mumps')
             self.solver_vel_cor = LUSolver('mumps')
-            self.solver_p = LUSolver('umfpack')
+            self.solver_p = LUSolver('mumps')
             if self.useRotationScheme:
-                self.solver_rot = LUSolver('umfpack')
+                self.solver_rot = LUSolver('mumps')
         else:
             # not needed, chosen not to use hypre_parasails:
             # if self.prec_v == 'hypre_parasails':  # in FEniCS 1.6.0 inaccessible using KrylovSolver class
@@ -281,37 +264,21 @@ class Solver(gs.GeneralSolver):
             if self.useRotationScheme:
                 self.solver_rot = KrylovSolver('cg', 'hypre_amg')
 
-        solver_options = {'monitor_convergence': True, 'maximum_iterations': 1000, 'nonzero_initial_guess': True}
-        # 'nonzero_initial_guess': True   with  solver.solbe(A, u, b) means that
-        # Solver will use anything stored in u as an initial guess
-
-        # Get the nullspace if there are no pressure boundary conditions
-        foo = Function(self.Q)     # auxiliary vector for setting pressure nullspace
-        if self.bc == 'nullspace':
-            null_vec = Vector(foo.vector())
-            self.Q.dofmap().set(null_vec, 1.0)
-            null_vec *= 1.0/null_vec.norm('l2')
-            self.null_space = VectorSpaceBasis([null_vec])
-            as_backend_type(A2).set_nullspace(self.null_space)
-
-        # apply global options for Krylov solvers
-        self.solver_vel_tent.parameters['relative_tolerance'] = 10 ** (-self.precision_rel_v_tent)
-        self.solver_vel_tent.parameters['absolute_tolerance'] = 10 ** (-self.precision_abs_v_tent)
-        self.solver_vel_cor.parameters['relative_tolerance'] = 10E-12
-        self.solver_vel_cor.parameters['absolute_tolerance'] = 10E-4
-        self.solver_p.parameters['relative_tolerance'] = 10**(-self.args.prp)
-        self.solver_p.parameters['absolute_tolerance'] = 10**(-self.args.pap)
-        if self.useRotationScheme:
-            self.solver_rot.parameters['relative_tolerance'] = 10E-10
-            self.solver_rot.parameters['absolute_tolerance'] = 10E-10
-
-        if self.args.Vrestart > 0:
-            self.solver_vel_tent.parameters['gmres']['restart'] = self.args.Vrestart
-
-        if self.args.solP == 'gmres' and self.args.Prestart > 0:
-            self.solver_p.parameters['gmres']['restart'] = self.args.Prestart
-
+        # setup Krylov solvers
         if self.solvers == 'krylov':
+            # Get the nullspace if there are no pressure boundary conditions
+            foo = Function(self.Q)     # auxiliary vector for setting pressure nullspace
+            if self.args.bc == 'nullspace':
+                null_vec = Vector(foo.vector())
+                self.Q.dofmap().set(null_vec, 1.0)
+                null_vec *= 1.0/null_vec.norm('l2')
+                self.null_space = VectorSpaceBasis([null_vec])
+                as_backend_type(A2).set_nullspace(self.null_space)
+
+            # apply global options for Krylov solvers
+            solver_options = {'monitor_convergence': True, 'maximum_iterations': 1000, 'nonzero_initial_guess': True}
+            # 'nonzero_initial_guess': True   with  solver.solve(A, u, b) means that
+            # Solver will use anything stored in u as an initial guess
             for solver in [self.solver_vel_tent, self.solver_vel_cor, self.solver_p, self.solver_rot] if \
                     self.useRotationScheme else [self.solver_vel_tent, self.solver_vel_cor, self.solver_p]:
                 for key, value in solver_options.items():
@@ -323,11 +290,27 @@ class Solver(gs.GeneralSolver):
                 solver.parameters['preconditioner']['structure'] = 'same'
                 # matrices A2-A4 do not change, so we can reuse preconditioners
 
-        self.solver_vel_tent.parameters['preconditioner']['structure'] = 'same_nonzero_pattern'
-        # matrix A1 changes every time step, so change of preconditioner must be allowed
+            self.solver_vel_tent.parameters['preconditioner']['structure'] = 'same_nonzero_pattern'
+            # matrix A1 changes every time step, so change of preconditioner must be allowed
+
+            self.solver_vel_tent.parameters['relative_tolerance'] = 10 ** (-self.args.prv1)
+            self.solver_vel_tent.parameters['absolute_tolerance'] = 10 ** (-self.args.pav1)
+            self.solver_vel_cor.parameters['relative_tolerance'] = 10E-12
+            self.solver_vel_cor.parameters['absolute_tolerance'] = 10E-4
+            self.solver_p.parameters['relative_tolerance'] = 10**(-self.args.prp)
+            self.solver_p.parameters['absolute_tolerance'] = 10**(-self.args.pap)
+            if self.useRotationScheme:
+                self.solver_rot.parameters['relative_tolerance'] = 10E-10
+                self.solver_rot.parameters['absolute_tolerance'] = 10E-10
+
+            if self.args.Vrestart > 0:
+                self.solver_vel_tent.parameters['gmres']['restart'] = self.args.Vrestart
+
+            if self.args.solP == 'gmres' and self.args.Prestart > 0:
+                self.solver_p.parameters['gmres']['restart'] = self.args.Prestart
 
         # boundary conditions
-        bcu, bcp = problem.get_boundary_conditions(self.bc == 'outflow', self.V, self.Q)
+        bcu, bcp = problem.get_boundary_conditions(self.args.bc == 'outflow', self.V, self.Q)
         self.tc.end('init')
         # Time-stepping
         info("Running of Incremental pressure correction scheme n. 1")
@@ -346,12 +329,6 @@ class Solver(gs.GeneralSolver):
 
             if doSave:
                 save_this_step = problem.save_this_step
-
-            # DDN debug
-            # u_ext_in = assemble(inner(u_ext, n)*problem.get_outflow_measure_form())
-            # DDN_triggered = assemble(min_value(Constant(0.), inner(u_ext, n))*problem.get_outflow_measure_form())
-            # print('DDN: u_ext*n dSout = ', u_ext_in)
-            # print('DDN: negative part of u_ext*n dSout = ', DDN_triggered)
 
             # assemble matrix (it depends on solution)
             self.tc.start('assembleA1')
@@ -390,12 +367,6 @@ class Solver(gs.GeneralSolver):
                 return 1
             end()
 
-            # DDN debug
-            # u_ext_in = assemble(inner(u_, n)*problem.get_outflow_measure_form())
-            # DDN_triggered = assemble(min_value(Constant(0.), inner(u_, n))*problem.get_outflow_measure_form())
-            # print('DDN: u_tent*n dSout = ', u_ext_in)
-            # print('DDN: negative part of u_tent*n dSout = ', DDN_triggered)
-
             if self.useRotationScheme:
                 begin("Computing tentative pressure")
             else:
@@ -411,7 +382,7 @@ class Solver(gs.GeneralSolver):
             self.tc.end('rhs')
             self.tc.start('applybcP')
             [bc.apply(A2, b) for bc in bcp]
-            if self.bc == 'nullspace':
+            if self.args.bc == 'nullspace':
                 self.null_space.orthogonalize(b)
             self.tc.end('applybcP')
             try:
@@ -428,9 +399,8 @@ class Solver(gs.GeneralSolver):
                     problem.averaging_pressure(foo)
                     problem.save_pressure(True, foo)
             else:
-                # we do not want to change p=0 on outflow, it conflicts with do-nothing conditions
                 foo = Function(self.Q)
-                foo.assign(p_)
+                foo.assign(p_)  # we do not want to change p_ by averaging
                 if save_this_step and not onlyVel:
                     problem.averaging_pressure(foo)
                     problem.save_pressure(False, foo)
@@ -440,7 +410,7 @@ class Solver(gs.GeneralSolver):
             self.tc.start('rhs')
             b = assemble(L3)
             self.tc.end('rhs')
-            if not self.B:
+            if not self.args.B:
                 self.tc.start('applybc3')
                 [bc.apply(A3, b) for bc in bcu]
                 self.tc.end('applybc3')
@@ -461,15 +431,6 @@ class Solver(gs.GeneralSolver):
                 problem.save_div(False, u_cor)
             end()
 
-            # debug
-            # plot(u_cor, interactive=True)
-
-            # DDN debug
-            # u_ext_in = assemble(inner(u_cor, n)*problem.get_outflow_measure_form())
-            # DDN_triggered = assemble(min_value(Constant(0.), inner(u_cor, n))*problem.get_outflow_measure_form())
-            # print('DDN: u_cor*n dSout = ', u_ext_in)
-            # print('DDN: negative part of u_cor*n dSout = ', DDN_triggered)
-
             if self.useRotationScheme:
                 begin("Rotation scheme pressure correction")
                 self.tc.start('rhs')
@@ -489,6 +450,7 @@ class Solver(gs.GeneralSolver):
 
                 if problem.args.debug_rot:
                     # save applied pressure correction (expressed as a term added to RHS of next tentative vel. step)
+                    # see comment next to argument definition
                     plot_cor_v.assign(project(k*grad(nu*div(u_)), self.V))
                     problem.fileDict['grad_cor']['file'] << (plot_cor_v, t)
 
@@ -499,7 +461,7 @@ class Solver(gs.GeneralSolver):
             self.tc.start('next')
             u1.assign(u0)
             u0.assign(u_cor)
-            u_.assign(u_cor)  # use corretced velocity as initial guess in first step
+            u_.assign(u_cor)  # use corrected velocity as initial guess in first step
 
             if self.useRotationScheme:
                 p0.assign(p_mod)

@@ -1,6 +1,8 @@
 from __future__ import print_function
 from dolfin import *
 
+# program used to compute different mesh characteristics for .xml meshes using FEniCS features
+
 # names = ['cyl_c1', 'cyl']
 # names = ['cyl_c1', 'cyl_d1', 'cyl_c2', 'cyl_d2', 'cyl_c3', 'cyl_c3o', 'cyl_d3', 'cyl_e3']
 # names = ['cyl_c1', 'cyl_c2', 'cyl_c3', 'cyl_c3o', 'cyl_c3o_netgen', 'cyl15_3']

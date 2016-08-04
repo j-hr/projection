@@ -22,7 +22,6 @@ class Solver(gs.GeneralSolver):
         # lower values saves more time and memory  at the cost of stability (see MUMPS manual)
         # default MUMPS value 0.01, empiric minimum 1E-6
 
-
     def __str__(self):
         return 'Newton method with MUMPS LU solver'
 

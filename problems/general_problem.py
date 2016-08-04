@@ -34,7 +34,7 @@ class GeneralProblem(object):
         self.tc.init_watch('saveP', 'Saved pressure', True)
         self.tc.init_watch('saveVel', 'Saved velocity', True)
         self.tc.init_watch('averageP', 'Averaged pressure', True)
-        self.tc.init_watch('updateBC', 'Updated velocity BC', True)
+        self.tc.init_watch('updateBC', 'Updated velocity BC', True, count_to_percent=True)
         self.tc.init_watch('div', 'Computed and saved divergence', True)
         self.tc.init_watch('divNorm', 'Computed norm of divergence', True)
         self.tc.init_watch('WSSinit', 'Initialized mesh for WSS', False)
