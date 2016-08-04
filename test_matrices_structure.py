@@ -15,6 +15,8 @@ from matplotlib.cm import get_cmap
 from matplotlib.pyplot import matshow, show, colorbar
 import matplotlib.pyplot as plt
 
+# file used to display matrix structure of different terms for small and simple geometries
+
 # doSavePlot = True
 # width = 800
 # height = 600

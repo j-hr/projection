@@ -5,6 +5,8 @@ from dolfin import Expression, near, pi
 from sympy import I, re, sqrt, exp, symbols, lambdify, besselj
 from scipy.special import jv
 
+# file provides some information (mainly averages) about analytic solution for use in womersley_cylinder.py
+
 R = 5.0
 r, tm = symbols('r tm')
 u = (-43.2592 * r ** 2 +
@@ -42,6 +44,8 @@ def average_analytic_pressure(factor):
 
 
 class WomersleyProfile(Expression):
+    # class no longer used, this inefficient way of generating analytic solution was replaced by
+    # precomputation and assembly of Bessel functions (modes)
     def __init__(self, factor):
         self.t = 0
         self.factor = factor
