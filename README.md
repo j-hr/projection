@@ -5,7 +5,7 @@ This code was developed during work on Master thesis "Projection method applied 
 The text of the thesis is available [here](https://drive.google.com/open?id=0B2eGGjPtxvxHTTc0d1JFN0pFMjQ).
 
 ## Dependency
-The code uses [FEniCS](https://fenicsproject.org/index.html) software. The code was created to work with 1.6.0 and 2016.1 release of FEniCS with [PETSc](https://www.mcs.anl.gov/petsc/) linear algebra backend.
+The code uses [FEniCS](https://fenicsproject.org/index.html) software. The code was created to work with 1.6.0 release of FEniCS with [PETSc](https://www.mcs.anl.gov/petsc/) linear algebra backend.
 
 ## Overview
 The motivation of the work, problems solved and methods used in the code are described in the thesis.
@@ -100,8 +100,6 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 |--Vrestart|positive integer|set GMRES restart parameter for 1st step|
 |--Prestart|positive integer|set GMRES restart parameter for 2nd step|
 |-s|"direct"|use only direct solvers|
-
-### For direct solver
 
 ## Another options
 Following options were not mentioned in the thesis.

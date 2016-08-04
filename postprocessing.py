@@ -8,6 +8,8 @@ import shutil
 
 regex = re.compile('"f_')
 
+# this file is used by main.py automatically
+
 
 def rewrite_xdmf_files(metadata):
     """changes xdmf vector name "f_something" into something like "problem_namevelocity_diff" """
@@ -44,7 +46,8 @@ def create_scripts(metadata):
     Generates scripts for convenient display of results using ParaView 4.4 Python interface
     """
     abspath = os.path.abspath(os.curdir)
-    shutil.copy2('../paraview_scripts/empty.pvsm', 'empty.pvsm')
+    shutil.copy2('../paraview_scripts/empty.pvsm', 'empty.pvsm')  # empty state file is needed to initialize ParaView
+    # comparison of tentative and corrected velocity:
     if metadata['hasTentativeV']:
         template = open('../paraview_scripts/template_compare_vel_tent_cor.py', 'r')
         out_file = open('compare_vel_tent.py', 'w')
@@ -62,6 +65,7 @@ def create_scripts(metadata):
         template.close()
         out_file.close()
     else:
+        # show velocity:
         template = open('../paraview_scripts/template_velocity.py', 'r')
         out_file = open('show_vel.py', 'w')
         for line in template:
@@ -77,6 +81,7 @@ def create_scripts(metadata):
         out_file.close()
     if metadata['hasWSS']:
         if metadata['WSSmethod'] == 'expression':
+            # WSS saved as CG,1 (point data in ParaView)
             template = open('../paraview_scripts/template_WSS.py', 'r')
             out_file = open('show_WSS.py', 'w')
             for line in template:
@@ -90,7 +95,7 @@ def create_scripts(metadata):
                 out_file.write(line)
             template.close()
             out_file.close()
-            # WSS norm
+            # WSS norm saved as CG,1 (point data in ParaView)
             template = open('../paraview_scripts/template_WSSnorm.py', 'r')
             out_file = open('show_WSSnorm.py', 'w')
             for line in template:
@@ -105,7 +110,7 @@ def create_scripts(metadata):
             template.close()
             out_file.close()
         elif metadata['WSSmethod'] == 'integral':
-            # WSS norm in DG space
+            # WSS norm in DG,0 space (cell data in ParaView)
             template = open('../paraview_scripts/template_WSSnormDG.py', 'r')
             out_file = open('show_WSSnormDG.py', 'w')
             for line in template:
