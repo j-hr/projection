@@ -179,7 +179,10 @@ class Solver(gs.GeneralSolver):
                     return form  # additional term must be added to non-constant part
 
         def pressure_rhs():
-            return inner(p0, div(v1)) * dx - inner(p0*n, v1) * problem.get_outflow_measure_form()
+            if self.args.bc == 'outflow':
+                return inner(p0, div(v1)) * dx
+            else:
+                return inner(p0, div(v1)) * dx - inner(p0*n, v1) * problem.get_outflow_measure_form()
 
         a1_const = (1./k)*inner(u, v1)*dx + diffusion(0.5*u)
         a1_change = nonlinearity(0.5*u)

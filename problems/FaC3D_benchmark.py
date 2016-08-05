@@ -26,7 +26,7 @@ class Problem(gp.GeneralProblem):
         self.factor = args.factor
         self.scale_factor.append(self.factor)
 
-        self.nu = 0.001 * args.nu  # kinematic viscosity
+        self.nu = 0.001 * args.nufactor  # kinematic viscosity
 
         # Import gmsh mesh
         self.compatible_meshes = ['bench3D_1', 'bench3D_2', 'bench3D_3']
@@ -37,7 +37,7 @@ class Problem(gp.GeneralProblem):
         self.cell_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_physical_region.xml")
         self.facet_function = MeshFunction("size_t", self.mesh, "meshes/" + args.mesh + "_facet_region.xml")
         self.dsIn = Measure("ds", subdomain_id=2, subdomain_data=self.facet_function)
-        # self.dsOut = Measure("ds", subdomain_id=3, subdomain_data=self.facet_function)
+        self.dsOut = Measure("ds", subdomain_id=3, subdomain_data=self.facet_function)
         self.dsWall = Measure("ds", subdomain_id=1, subdomain_data=self.facet_function)
         self.dsCyl = Measure("ds", subdomain_id=5, subdomain_data=self.facet_function)
         self.normal = FacetNormal(self.mesh)
@@ -55,6 +55,7 @@ class Problem(gp.GeneralProblem):
     def setup_parser_options(parser):
         super(Problem, Problem).setup_parser_options(parser)
         parser.add_argument('-F', '--factor', help='Velocity scale factor', type=float, default=1.0)
+        parser.add_argument('--nufactor', help='kinematic viscosity factor', type=float, default=1.0)
 
     def initialize(self, V, Q, PS, D):
         super(Problem, self).initialize(V, Q, PS, D)
@@ -70,8 +71,13 @@ class Problem(gp.GeneralProblem):
         # average = assemble((1.0/area) * interpolate(expr, scalarSpace) * self.dsIn)
         # print('Average velocity:', average)
         # re = average * 0.1 / self.nu  # average_velocity*cylinger_diameter/kinematic_viscosity
-        re = 20.0 * self.factor / self.nu_factor  # average_velocity*cylinger_diameter/kinematic_viscosity
+        re = 20.0 * self.factor / self.args.nufactor  # average_velocity*cylinger_diameter/kinematic_viscosity
         print('Reynolds number:', re)
+
+        one = (interpolate(Expression('1.0'), Q))
+        self.mesh_volume = assemble(one*dx)
+        self.outflow_area = assemble(one*self.dsOut)
+        print('Outflow area:', self.outflow_area)
 
     # parabolic profile on square normed so centerline velocity = 1m/s * factor
     class InputVelocityProfile(Expression):

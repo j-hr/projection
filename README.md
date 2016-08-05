@@ -102,9 +102,9 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 |-s|"direct"|use only direct solvers|
 
 ## Another options
-Following options were not mentioned in the thesis.
+Following options were not mentioned in the thesis:
 Problem "steady_cylinder" is a simpler variant of test problem "womersley_cylinder", with steady parabolic inflow profile instead of pulsating Womersley flow.
-Problem "FaC3D_benchmark"
+Problem "FaC3D_benchmark" was meant to test projection method on 3D benchmark of flow around a cylinder (described [here](http://www.featflow.de/en/benchmarks/cfdbenchmarking/flow/dfg_flow3d/dfg_flow3d_configuration.html)). It was not finished. It can be run to compute velocity etc., but is missing a code to compute and visualize drag and lift functionals.
 
 # Visualisation of results
 Computed results are stored in XDMF files. To open them you can use the [ParaView](http://www.paraview.org/) software.

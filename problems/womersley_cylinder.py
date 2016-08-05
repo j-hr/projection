@@ -41,6 +41,7 @@ class Problem(gp.GeneralProblem):
         self.mesh_volume = pi*25.*20.
 
         # Import gmsh mesh
+        self.tc.start('mesh')
         self.mesh, self.facet_function = super(Problem, self).loadMesh(args.mesh)
         self.dsIn = Measure("ds", subdomain_id=2, subdomain_data=self.facet_function)
         self.dsOut = Measure("ds", subdomain_id=3, subdomain_data=self.facet_function)
@@ -49,6 +50,7 @@ class Problem(gp.GeneralProblem):
         print("Mesh name: ", args.mesh, "    ", self.mesh)
         print("Mesh norm max: ", self.mesh.hmax())
         print("Mesh norm min: ", self.mesh.hmin())
+        self.tc.end('mesh')
 
         self.sol_p = None
         self.last_analytic_pressure_norm = None

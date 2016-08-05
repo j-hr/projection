@@ -30,7 +30,7 @@ class GeneralProblem(object):
         self.args = args
         # Time control
         self.tc = tc
-        self.tc.init_watch('mesh', 'mesh import', True)
+        self.tc.init_watch('mesh', 'Imported mesh', True)
         self.tc.init_watch('saveP', 'Saved pressure', True)
         self.tc.init_watch('saveVel', 'Saved velocity', True)
         self.tc.init_watch('averageP', 'Averaged pressure', True)
