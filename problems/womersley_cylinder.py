@@ -2,7 +2,7 @@ from __future__ import print_function
 
 import math
 from dolfin import assemble, interpolate, Expression, Function, DirichletBC, norm, errornorm, Constant
-from dolfin.cpp.common import toc, mpi_comm_world
+from dolfin.cpp.common import toc, mpi_comm_world, info
 from dolfin.cpp.io import HDF5File
 from math import pi, sqrt
 from ufl import Measure, cos, sin, FacetNormal, inner, grad, outer, Identity, sym
@@ -105,10 +105,11 @@ class Problem(gp.GeneralProblem):
         self.v_in = Function(V)
         print('Initializing error control')
         self.load_precomputed_bessel_functions(PS)
+
         self.solution = self.assemble_solution(0.0)
 
         # set constants for
-        self.area = assemble(interpolate(Expression("1.0"), Q) * self.dsIn)  # inflow area
+        self.area = assemble(interpolate(Expression("1.0", degree=1), Q) * self.dsIn)  # inflow area
 
         # womersley = steady + e^iCt, e^iCt has average 0
         self.pg_normalization_factor.append(womersleyBC.average_analytic_pressure_grad(self.factor))
@@ -117,7 +118,7 @@ class Problem(gp.GeneralProblem):
         self.vel_normalization_factor.append(norm(
             interpolate(womersleyBC.average_analytic_velocity_expr(self.factor), self.vSpace), norm_type='L2'))
 
-        one = (interpolate(Expression('1.0'), Q))
+        one = (interpolate(Expression('1.0', degree=1), Q))
         self.outflow_area = assemble(one*self.dsOut)
         print('Outflow area:', self.outflow_area)
 
@@ -212,12 +213,12 @@ class Problem(gp.GeneralProblem):
         temp = toc()
         fce = Function(PS)
         f.read(fce, "parab")
-        self.bessel_parabolic = Function(fce)
+        self.bessel_parabolic = fce.copy(deepcopy=True)
         for i in range(8):
             f.read(fce, "real%d" % i)
-            self.bessel_real.append(Function(fce))
+            self.bessel_real.append(fce.copy(deepcopy=True))
             f.read(fce, "imag%d" % i)
-            self.bessel_complex.append(Function(fce))
+            self.bessel_complex.append(fce.copy(deepcopy=True))
         print("Loaded partial solution functions. Time: %f" % (toc() - temp))
 
     def compute_err(self, is_tent, velocity, t):

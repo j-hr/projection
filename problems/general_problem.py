@@ -366,7 +366,7 @@ class GeneralProblem(object):
     def save_div(self, is_tent, field):
         self.tc.start('div')
         self.divFunction.assign(project(div(field), self.divSpace))
-        self.fileDict['d2' if is_tent else 'd']['file'] << (self.divFunction, self.actual_time)
+        self.fileDict['d2' if is_tent else 'd']['file'].write(self.divFunction, self.actual_time)
         self.tc.end('div')
 
     def compute_div(self, is_tent, velocity):
@@ -378,10 +378,10 @@ class GeneralProblem(object):
     # method for saving velocity (ensuring, that it will be one time line in ParaView)
     def save_vel(self, is_tent, field):
         self.vFunction.assign(field)
-        self.fileDict['u2' if is_tent else 'u']['file'] << (self.vFunction, self.actual_time)
+        self.fileDict['u2' if is_tent else 'u']['file'].write(self.vFunction, self.actual_time)
         if self.doSaveDiff:
             self.vFunction.assign((1.0 / self.vel_normalization_factor[0]) * (field - self.solution))
-            self.fileDict['u2D' if is_tent else 'uD']['file'] << (self.vFunction, self.actual_time)
+            self.fileDict['u2D' if is_tent else 'uD']['file'].write(self.vFunction, self.actual_time)
 
     def compute_err(self, is_tent, velocity, t):
         if self.doErrControl:
@@ -426,11 +426,11 @@ class GeneralProblem(object):
 
     def save_pressure(self, is_tent, pressure):
         self.tc.start('saveP')
-        self.fileDict['p2' if is_tent else 'p']['file'] << (pressure, self.actual_time)
+        self.fileDict['p2' if is_tent else 'p']['file'].write(pressure, self.actual_time)
         # NT normalisation factor defined only in Womersley
         # pg = project((1.0 / self.pg_normalization_factor[0]) * grad(pressure), self.pgSpace)
         # self.pgFunction.assign(pg)
-        # self.fileDict['pg2' if is_tent else 'pg'][0] << (self.pgFunction, self.actual_time
+        # self.fileDict['pg2' if is_tent else 'pg'][0].write(self.pgFunction, self.actual_time
         self.tc.end('saveP')
 
     def get_boundary_conditions(self, use_pressure_BC, v_space, p_space):
@@ -511,15 +511,15 @@ class GeneralProblem(object):
                 # pressure is not used as it contributes only to the normal component
                 stress.set_allow_extrapolation(True)   # need because of some inaccuracies in BoundaryMesh coordinates
                 stress_b = interpolate(stress, self.Tb)    # restrict stress to boundary mesh
-                # self.fileDict['stress']['file'] << (stress_b, self.actual_time)
+                # self.fileDict['stress']['file'].write(stress_b, self.actual_time)
                 # info('Saved stress tensor')
                 info('Computing WSS')
                 wss = dot(stress_b, self.nb) - inner(dot(stress_b, self.nb), self.nb)*self.nb
                 wss_func = project(wss, self.Vb)
                 wss_norm = project(sqrt_ufl(inner(wss, wss)), self.Sb)
                 info('Saving WSS')
-                self.fileDict['wss']['file'] << (wss_func, self.actual_time)
-                self.fileDict['wss_norm']['file'] << (wss_norm, self.actual_time)
+                self.fileDict['wss']['file'].write(wss_func, self.actual_time)
+                self.fileDict['wss_norm']['file'].write(wss_norm, self.actual_time)
             if self.args.wss_method == 'integral':
                 wss_norm = Function(self.SDG)
                 mS = TestFunction(self.SDG)
@@ -528,7 +528,7 @@ class GeneralProblem(object):
                 wss = dot(stress, self.normal) - inner(dot(stress, self.normal), self.normal)*self.normal
                 wss_norm_form = scaling*mS*sqrt_ufl(inner(wss, wss))*ds   # ds is integral over exterior facets only
                 assemble(wss_norm_form, tensor=wss_norm.vector())
-                self.fileDict['wss_norm']['file'] << (wss_norm, self.actual_time)
+                self.fileDict['wss_norm']['file'].write(wss_norm, self.actual_time)
 
                 # to get vector WSS values:
                 # NT this works, but in ParaView for (DG,1)-vector space glyphs are displayed in cell centers
@@ -539,7 +539,7 @@ class GeneralProblem(object):
                 #     assemble(wss_vector_form, tensor=wss_component.vector())
                 #     wss_vector.append(wss_component)
                 # wss_func = project(as_vector(wss_vector), self.VDG)
-                # self.fileDict['wss']['file'] << (wss_func, self.actual_time)
+                # self.fileDict['wss']['file'].write(wss_func, self.actual_time)
             self.tc.end('WSS')
             end()
 

@@ -15,7 +15,7 @@ do
     echo \#SBATCH -p $queue >> $name
     echo \#SBATCH -o "${name}.out" >> $name
     echo echo $name >> $name
-    echo module add fenics/1.6.0 >> $name
+    echo module add fenics/2016.1.0 >> $name
     echo echo Running on host \`hostname\` >> $name
     echo echo uloha: $run -n $name >> $name
     echo echo Time is \`date\` >> $name

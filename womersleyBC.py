@@ -36,7 +36,7 @@ def average_analytic_velocity(factor):
 
 
 def average_analytic_velocity_expr(factor):
-    return Expression(("0", "0", "factor*(1081.48-43.2592 * (x[0]*x[0]+x[1]*x[1]))"), factor=factor)
+    return Expression(("0", "0", "factor*(1081.48-43.2592 * (x[0]*x[0]+x[1]*x[1]))"), factor=factor, degree=2)
 
 
 def average_analytic_pressure(factor):
@@ -75,9 +75,9 @@ def analytic_pressure_grad(factor, t):
 
 def average_analytic_pressure_expr(factor):
     gradient = -641.967 * factor
-    return Expression("grad*x[2]", grad=gradient)
+    return Expression("grad*x[2]", grad=gradient, degree=2)
 
 
 def analytic_pressure(factor, t):
     gradient = analytic_pressure_grad(factor, t)
-    return Expression("grad*x[2]", grad=gradient)
+    return Expression("grad*x[2]", grad=gradient, degree=2)
