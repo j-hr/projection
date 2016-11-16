@@ -6,6 +6,7 @@ from dolfin.cpp.common import info, begin, end
 from dolfin.cpp.la import LUSolver, KrylovSolver, PETScKrylovSolver, as_backend_type, VectorSpaceBasis, Vector
 from dolfin.functions import TrialFunction, TestFunction, Constant, FacetNormal
 from ufl import dot, dx, grad, system, div, inner, sym, Identity, sqrt, min_value
+from ufl.domain import find_geometric_dimension
 import general_solver as gs
 
 
@@ -124,7 +125,7 @@ class Solver(gs.GeneralSolver):
         q = TestFunction(self.Q)
 
         n = FacetNormal(mesh)
-        I = Identity(u.geometric_dimension())
+        I = Identity(find_geometric_dimension(u))
 
         # Initial conditions: u0 velocity at previous time step u1 velocity two time steps back p0 previous pressure
         [u1, u0, p0] = self.problem.get_initial_conditions([{'type': 'v', 'time': -dt},

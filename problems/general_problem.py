@@ -420,7 +420,7 @@ class GeneralProblem(object):
         # averaging pressure (subtract average)
         p_average = assemble((1.0 / self.mesh_volume) * pressure * dx)
         info('Average pressure: %f' % p_average)
-        p_average_function = interpolate(Expression("p", p=p_average), self.pSpace)
+        p_average_function = interpolate(Expression("p", p=p_average, degree=1), self.pSpace)
         pressure.assign(pressure - p_average_function)
         self.tc.end('averageP')
 

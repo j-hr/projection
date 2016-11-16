@@ -9,7 +9,7 @@ from ufl import Measure, dx
 
 import itertools, csv
 
-meshName = 'HYK3'
+meshName = 'cyl_c2'
 
 # INPUT DATA ============================
 # OLD input data at the end of a file
@@ -21,16 +21,13 @@ meshName = 'HYK3'
 # planes can intersect the geometry, as is improbable that any exterior facet will have all vertices in given planes
 # otherwise it would be necessary to check distance from centerpoint
 inflows = [
-    {'number': 2, 'normal': [0.0, 1.0, 0.0], 'center': [6.40697, 0.344021, 13.8723], 'radius': 1.10057,
-     'reference_radius': 1.01077},
-    {'number': 4, 'normal': [0.0933764, -0.933764, -0.345493], 'center': [0.779737, 20.9159, 15.1405], 'radius': 0.620773,
-     'reference_radius': 0.553786},
+    {'number': 2, 'normal': [0.0, 0.0, 1.0], 'center': [0.0, 0.0, -10.0], 'radius': 5.0,
+     'reference_radius': 5.0},
 ]
 outflows = [
-    {'number': 3, 'normal': [-0.838444, 0, 0.544988], 'center': [15.2517, 12.5227, 1.45616]},
-    {'number': 5, 'normal': [-1.0, 0.0, 0.0], 'center': [23.0346, 12.2879, 5.18944]},
+    {'number': 3, 'normal': [0.0, 0.0, 1.0], 'center': [0.0, 0.0, 10.0]},
 ]
-number_list = [2, 3, 4, 5]  # numbers of inflows, outflows, '1' is reserved for walls
+number_list = [2, 3]  # numbers of inflows, outflows, '1' is reserved for walls
 # END OF INPUT ==============================
 mesh = Mesh("meshes/" + meshName + ".xml")
 tdim = mesh.topology().dim()
@@ -158,3 +155,15 @@ outflows = [
     {'number': 5, 'normal': [-1.0, 0.0, 0.0], 'center': [23.0346, 12.2879, 5.18944]},
 ]
 number_list = [2, 3, 4, 5]  # numbers of inflows, outflows, '1' is reserved for walls
+
+# cyl_c*
+inflows = [
+    {'number': 2, 'normal': [0.0, 0.0, 1.0], 'center': [0.0, 0.0, -10.0], 'radius': 5.0,
+     'reference_radius': 5.0},
+]
+outflows = [
+    {'number': 3, 'normal': [0.0, 0.0, 1.0], 'center': [0.0, 0.0, 10.0]},
+]
+number_list = [2, 3]  # numbers of inflows, outflows, '1' is reserved for walls
+
+

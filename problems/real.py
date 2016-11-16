@@ -118,10 +118,11 @@ class Problem(gp.GeneralProblem):
         # generate inflow profiles
         for obj in self.inflows:
             obj['velocity_profile'] = Problem.InputVelocityProfile(self.factor*float(obj['reference_coef']),
-                                                                   obj['center'], obj['normal'], float(obj['radius']))
+                                                                   obj['center'], obj['normal'], float(obj['radius']),
+                                                                   degree=2)
 
     class InputVelocityProfile(Expression):
-        def __init__(self, factor, center, normal, radius):
+        def __init__(self, factor, center, normal, radius, **kwargs):
             self.t = 0.
             self.onset_factor = 1.
             self.factor = factor
