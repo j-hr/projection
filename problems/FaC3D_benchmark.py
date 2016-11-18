@@ -124,8 +124,8 @@ class Problem(gp.GeneralProblem):
             self.isWholeSecond = True
             seconds = int(round(self.actual_time))
             self.second_list.append(seconds)
-            self.N1 = seconds*self.stepsInSecond
-            self.N0 = (seconds-1)*self.stepsInSecond
+            self.N1 = seconds*self.stepsInCycle
+            self.N0 = (seconds-1)*self.stepsInCycle
         else:
             self.isWholeSecond = False
 

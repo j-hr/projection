@@ -2,7 +2,7 @@ from __future__ import print_function
 
 import argparse
 import sys
-from dolfin import set_log_level, INFO, DEBUG, parameters
+from dolfin import set_log_level, INFO, DEBUG, parameters, DOLFIN_EPS
 from dolfin.cpp.common import mpi_comm_world, MPI, info
 from dolfin.cpp.la import PETScOptions
 
@@ -16,8 +16,9 @@ parser.add_argument('problem', help='Which problem to solve', choices=['womersle
                                                                        'FaC3D_benchmark', 'real'])
 parser.add_argument('solver', help='Which solver to use', choices=['ipcs1', 'direct'])
 parser.add_argument('mesh', help='Mesh name')
-parser.add_argument('time', help='Total time', type=float)
 parser.add_argument('dt', help='Time step', type=float)
+parser.add_argument('-t', '--time', help='Total time (has precedence over --cycles)', type=float, default=0.0)
+parser.add_argument('-c', '--cycles', help='Number of cycles (used if --time not specified)', type=float, default=1.0)
 parser.add_argument('-n', '--name', help='name of this run instance', default='test')
 parser.add_argument('--out', help='Which processors in parallel should print output?', choices=['all', 'main'],
                     default='main')
@@ -76,6 +77,11 @@ info("Solver:       " + args.solver)
 # Set parameter values
 dt = args.dt
 ttime = args.time
+if ttime < DOLFIN_EPS:
+    cycles = args.cycles
+    cl = problem.cycle_length
+    info('Time specified by number of cycles (%f) of length %f' % (cycles, cl))
+    ttime = cl*cycles
 info('Time:         %f s' % ttime)
 info('dt:           %f s' % dt)
 metadata.update({

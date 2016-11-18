@@ -20,6 +20,10 @@ class Problem(gp.GeneralProblem):
         self.status_functional_str = 'outflow/inflow'
         self.last_inflow = 0
 
+        # time settings
+        self.itp_lengths = {1: 1.0, 2: 0.9375, }
+        self.cycle_length = self.itp_lengths[self.args.itp]
+
         # input parameters
         self.nu = self.args.nu  # kinematic viscosity
         self.factor = args.factor
@@ -110,25 +114,28 @@ class Problem(gp.GeneralProblem):
         #parser.add_argument('--ic', help='Initial condition', choices=['zero'], default='zero')
         parser.add_argument('-F', '--factor', help='Velocity scale factor', type=float, default=1.0)
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=3.71)
+        parser.add_argument('--itp', help='inflow time profile polynomial', choices=[1, 2], default=2)
 
     def initialize(self, V, Q, PS, D):
         super(Problem, self).initialize(V, Q, PS, D)
         #info("IC type: " + self.ic)
         info("Velocity scale factor = %4.2f" % self.factor)
+        itp = Problem.v_function if self.args.itp == 1 else Problem.v_function_2
         # generate inflow profiles
         for obj in self.inflows:
             obj['velocity_profile'] = Problem.InputVelocityProfile(self.factor*float(obj['reference_coef']),
                                                                    obj['center'], obj['normal'], float(obj['radius']),
-                                                                   degree=2)
+                                                                   itp, degree=2)
 
     class InputVelocityProfile(Expression):
-        def __init__(self, factor, center, normal, radius, **kwargs):
+        def __init__(self, factor, center, normal, radius, itp, **kwargs):
             self.t = 0.
             self.onset_factor = 1.
             self.factor = factor
             self.center = center
             self.radius = radius
             self.normal = normal
+            self.itp = itp
 
         def eval(self, value, x):
             x_dist2 = float((x[0]-self.center[0])*(x[0]-self.center[0]))
@@ -137,7 +144,7 @@ class Problem(gp.GeneralProblem):
             rad = float(sqrt(x_dist2+y_dist2+z_dist2))
             # do not evaluate on boundaries or outside of circle:
             velocity = 0 if near(rad, self.radius) or rad > self.radius else \
-                2.*self.onset_factor*self.factor*Problem.v_function(self.t)*(1.0 - rad*rad/(self.radius*self.radius))
+                2.*self.onset_factor*self.factor*self.itp(self.t)*(1.0 - rad*rad/(self.radius*self.radius))
             value[0] = velocity * self.normal[0]
             value[1] = velocity * self.normal[1]
             value[2] = velocity * self.normal[2]
@@ -148,7 +155,6 @@ class Problem(gp.GeneralProblem):
     # polynomial defining average inflow velocity
     @staticmethod
     def v_function(tt):
-        # nejprve zadavane casti
         T = 1.0  # Period length
         v_m = 300  # min. velocity
         v_M = 800  # max. velocity
@@ -166,6 +172,27 @@ class Problem(gp.GeneralProblem):
             return v_m + (v_M-v_m)/3.0 + (a_3*(t-(2.0*T/3.0))*(t-(2.0*T/3.0)))
         else:
             return v_m + (v_M-v_m)/3.0 - (a_3*(t-(2.0*T/3.0))*(t-(2.0*T/3.0)))
+
+    # another polynomial defining average inflow velocity
+    @staticmethod
+    def v_function_2(tt):
+        T = 0.9375  # Period length
+        v_m = 180  # min. velocity
+        v_M = 480  # max. velocity
+
+        a_12 = (-36.0) * (v_M - v_m) / T / T
+        a_22 = (-24.0) * (v_M - v_m) / T / T
+        a_32 = 0.5 * (v_M - v_m) / T / T
+
+        # tt -= T/2.
+        t = tt % T
+        # t = tt
+        if t < T / 6.0:
+            return v_M + (a_12*(t-(T/6))*(t-(T/6)))
+        elif t < T / 3.0:
+            return v_M + (a_22*(t-(T/6))*(t-(T/6)))
+        else:
+            return v_m + (a_32*(t-T)*(t-T))
 
     def get_boundary_conditions(self, use_pressure_BC, v_space, p_space):
         # boundary parts: 1 walls, inflows and outflows specified in [meshName].ini file

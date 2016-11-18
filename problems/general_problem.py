@@ -7,7 +7,7 @@ import os
 import sys
 import traceback
 from dolfin import Function, TestFunction, assemble, interpolate, Expression, project, norm, errornorm, \
-    TensorFunctionSpace, FunctionSpace, VectorFunctionSpace
+    TensorFunctionSpace, FunctionSpace, VectorFunctionSpace, DOLFIN_EPS
 from dolfin.cpp.common import mpi_comm_world, toc, MPI, info, begin, end
 from dolfin.cpp.io import XDMFFile, HDF5File
 from dolfin.cpp.mesh import Mesh, MeshFunction, BoundaryMesh, Cell
@@ -61,7 +61,7 @@ class GeneralProblem(object):
         self.mesh = None
         self.facet_function = None
         self.mesh_volume = 0   # must be specified in subclass (needed to compute pressure average)
-        self.stepsInSecond = None
+        self.stepsInCycle = None
         self.vSpace = None
         self.vFunction = None
         self.divSpace = None
@@ -75,7 +75,12 @@ class GeneralProblem(object):
 
         # time related variables
         self.actual_time = 0.0
+        self.cycle_length = 1.0
         self.step_number = 0
+        self.chosen_steps = [0.1, 0.125, 0.15, 0.16, 0.165, 0.166, 0.167, 0.17, 0.188, 0.189, 0.2]  # must be specified in subclass
+        # 0.166... is peak for real problem, 0.188 is peak for womersley profile
+        # TODO chosen_steps should depend on problem (and inflow profile)
+        self.distance_from_chosen_steps = 0.0
         self.save_this_step = False
         self.isWholeSecond = None
         self.N1 = None
@@ -106,7 +111,6 @@ class GeneralProblem(object):
         self.R = None
         self.SDG = None
         self.nb = None
-        self.peak_time_steps = None
 
         # dictionaries for output XDMF files
         self.fileDict = {'u': {'name': 'velocity'},
@@ -241,7 +245,7 @@ class GeneralProblem(object):
         #   diff: save also difference vel-sol
         #   noSave: do not create .xdmf files with velocity, pressure, divergence
         parser.add_argument('--saventh', help='save only n-th step in first cycle', type=int, default=1)
-        parser.add_argument('--ST', help='save only n-th step in first cycle',
+        parser.add_argument('--ST', help='save modes',
                             choices=['min', 'peak', 'no_restriction'], default='no_restriction')
         # stronger than --saventh, to be used instead of it
         parser.add_argument('--onset', help='boundary condition onset length', type=float, default=0.5)
@@ -298,16 +302,8 @@ class GeneralProblem(object):
         # self.pgSpace = VectorFunctionSpace(mesh, "DG", 0)    # used to save pressure gradient as vectors
         # self.pgFunction = Function(self.pgSpace)
         self.initialize_xdmf_files()
-        self.stepsInSecond = int(round(1.0 / self.metadata['dt']))
-        info('stepsInSecond = %d' % self.stepsInSecond)
-
-        if self.args.ST == 'min' or self.args.wss == 'peak':
-            # 0.166... is peak for real problem, 0.188 is peak for womersley profile
-            chosen_steps = [0.1, 0.125, 0.15, 0.16, 0.165, 0.166, 0.167, 0.17, 0.188, 0.189, 0.2]
-            # select computed steps nearest to chosen steps:
-            self.peak_time_steps = [int(round(chosen / self.metadata['dt'])) for chosen in chosen_steps]
-            for ch in self.peak_time_steps:
-                info('Chosen peak time steps at every %dth step in %d steps' % (ch, self.stepsInSecond))
+        self.stepsInCycle = self.cycle_length / self.metadata['dt']
+        info('stepsInCycle = %f' % self.stepsInCycle)
 
         if self.args.wss != 'none':
             self.tc.start('WSSinit')
@@ -450,31 +446,42 @@ class GeneralProblem(object):
         pass
 
     def update_time(self, actual_time, step_number):
-        info('t = %f, step %d' % (actual_time, step_number))
+        info('GS_UPDATE_TIME t = %f, step %d' % (actual_time, step_number))
         self.actual_time = actual_time
         self.step_number = step_number
         self.time_list.append(self.actual_time)
-        if self.onset < 0.001 or self.actual_time > self.onset:
+        if self.onset < 0.001 or self.actual_time > self.onset:  # TODO onset time relative to cycle_length
             self.onset_factor = 1.
         else:
             self.onset_factor = (1. - cos(pi * actual_time / self.onset))*0.5
-        info('Onset factor: %f' % self.onset_factor)
+        info('GS_UPDATE_TIME Onset factor: %f' % self.onset_factor)
 
         # Manage saving choices for this step
         # save only n-th step in first second
+
+        dec, i = modf(actual_time / self.cycle_length)
+        i = int(i)
+        info('GS_UPDATE_TIME Cycles done: %d' % i)
+        info('GS_UPDATE_TIME Relative part of cycle: %f' % dec)
+        dec *= self.cycle_length
+        info('GS_UPDATE_TIME Absolute time in  cycle: %f' % dec)
+        self.distance_from_chosen_steps = min([abs(dec - d) for d in self.chosen_steps])
+        # TODO use self.close_to_chosen_steps
+        info('GS_UPDATE_TIME Distance from chosen steps: %f' % self.distance_from_chosen_steps)
+        info('GS_UPDATE_TIME Distance threshold: %f' % (0.5 * self.metadata['dt'] + DOLFIN_EPS))
+
         if self.doSave:
-            dec, i = modf(actual_time)
-            i = int(i)
             if self.args.ST == 'min':
-                self.save_this_step = (i >= 1 and (step_number % self.stepsInSecond in self.peak_time_steps))
+                self.save_this_step = (i >= 1 and (self.distance_from_chosen_steps < 0.5 * self.metadata['dt'] + DOLFIN_EPS))
+                # QQ might skip step? change 0.5 to 0.51?
             elif self.args.ST == 'peak':
-                self.save_this_step = (i >= 1 and 0.1 < dec < 0.20001)
+                self.save_this_step = (i >= 1 and 0.1 < dec < 0.20001)  # TODO relative to cycle_length
             elif self.save_nth == 1 or i >= 1 or self.step_number % self.save_nth == 0:
                 self.save_this_step = True
             else:
                 self.save_this_step = False
             if self.save_this_step:
-                info('Chose to save this step: (%f, %d)' % (actual_time, step_number))
+                info('GS_UPDATE_TIME Chose to save this step: (%f, %d)' % (actual_time, step_number))
 
     # this generates vector expression of normal on boundary mesh
     # for right orientation use BoundaryMesh(..., order=False)
@@ -502,8 +509,10 @@ class GeneralProblem(object):
 
     def compute_functionals(self, velocity, pressure, t, step):
         if self.args.wss == 'all' or \
-                (step >= self.stepsInSecond and self.args.wss == 'peak' and
-                 ((step % self.stepsInSecond) in self.peak_time_steps)):
+                (step >= self.stepsInCycle and self.args.wss == 'peak' and
+                 (self.distance_from_chosen_steps < 0.5 * self.metadata['dt'])):
+            # TODO check if choosing time steps works properly
+            # QQ might skip step? change 0.5 to 0.51?
             self.tc.start('WSS')
             begin('WSS (%dth step)' % step)
             if self.args.wss_method == 'expression':
@@ -612,43 +621,47 @@ class GeneralProblem(object):
                         self.listDict[key]['relative_list'] = temp_list
                         report_writer.writerow([md['name'], "relative " + l['name'], abrev+"r"] + temp_list)
 
-        # report error norms, norms of divergence etc. averaged over seconds
-        if self.second_list:
-            with open(self.str_dir_name + "/report_seconds.csv", 'w') as reportFile:
-                report_writer = csv.writer(reportFile, delimiter=';', escapechar='|', quoting=csv.QUOTE_NONE)
-                report_writer.writerow(["name", "what", "time"] + self.second_list)
-                keys = sorted(self.listDict.keys())
-                for key in keys:
-                    l = self.listDict[key]
-                    if 'slist' in l and l['list']:
-                        abrev = l['abrev']
-                        values = l['slist']
-                        # generate averages over seconds from list
-                        for sec in self.second_list:
-                            N0 = (sec-1)*self.stepsInSecond
-                            N1 = sec*self.stepsInSecond
-                            values.append(sqrt(sum([i*i for i in l['list'][N0:N1]])/float(self.stepsInSecond)))
+        # report error norms, norms of divergence etc. averaged over cycles
+        # IFNEED rewrite to averaging over cycles (must track number of steps in cycle, it can be different for each cycle)
+        # NT for cases when cycle_length % dt != 0 will be inacurate (less with smaller time steps)
+        # note: self.stepsInCycle is float
 
-                        report_writer.writerow([md['name'], l['name'], abrev] + values)
-                        if 'scale' in l:
-                            temp_list = [i/l['scale'][0] for i in values]
-                            report_writer.writerow([md['name'], "scaled " + l['name'], abrev+"s"] + temp_list)
-                        if 'norm' in l:
-                            if l['norm']:
-                                temp_list = [i/l['norm'][0] for i in values]
-                                l['normalized_list_sec'] = temp_list
-                                report_writer.writerow([md['name'], "normalized " + l['name'], abrev+"n"] + temp_list)
-                            else:
-                                info('Norm missing:' + str(l))
-                                l['normalized_list_sec'] = []
-                        if 'relative_list' in l:
-                            temp_list = []
-                            for sec in self.second_list:
-                                N0 = (sec-1)*self.stepsInSecond
-                                N1 = sec*self.stepsInSecond
-                                temp_list.append(sqrt(sum([i*i for i in l['relative_list'][N0:N1]])/float(self.stepsInSecond)))
-                            l['relative_list_sec'] = temp_list
-                            report_writer.writerow([md['name'], "relative " + l['name'], abrev+"r"] + temp_list)
+        # if self.second_list:
+        #     with open(self.str_dir_name + "/report_seconds.csv", 'w') as reportFile:
+        #         report_writer = csv.writer(reportFile, delimiter=';', escapechar='|', quoting=csv.QUOTE_NONE)
+        #         report_writer.writerow(["name", "what", "time"] + self.second_list)
+        #         keys = sorted(self.listDict.keys())
+        #         for key in keys:
+        #             l = self.listDict[key]
+        #             if 'slist' in l and l['list']:
+        #                 abrev = l['abrev']
+        #                 values = l['slist']
+        #                 # generate averages over seconds from list
+        #                 for sec in self.second_list:
+        #                     N0 = (sec-1)*self.stepsInCycle
+        #                     N1 = sec*self.stepsInCycle
+        #                     values.append(sqrt(sum([i*i for i in l['list'][N0:N1]]) / float(self.stepsInCycle)))
+        #
+        #                 report_writer.writerow([md['name'], l['name'], abrev] + values)
+        #                 if 'scale' in l:
+        #                     temp_list = [i/l['scale'][0] for i in values]
+        #                     report_writer.writerow([md['name'], "scaled " + l['name'], abrev+"s"] + temp_list)
+        #                 if 'norm' in l:
+        #                     if l['norm']:
+        #                         temp_list = [i/l['norm'][0] for i in values]
+        #                         l['normalized_list_sec'] = temp_list
+        #                         report_writer.writerow([md['name'], "normalized " + l['name'], abrev+"n"] + temp_list)
+        #                     else:
+        #                         info('Norm missing:' + str(l))
+        #                         l['normalized_list_sec'] = []
+        #                 if 'relative_list' in l:
+        #                     temp_list = []
+        #                     for sec in self.second_list:
+        #                         N0 = (sec-1)*self.stepsInCycle
+        #                         N1 = sec*self.stepsInCycle
+        #                         temp_list.append(sqrt(sum([i*i for i in l['relative_list'][N0:N1]]) / float(self.stepsInCycle)))
+        #                     l['relative_list_sec'] = temp_list
+        #                     report_writer.writerow([md['name'], "relative " + l['name'], abrev+"r"] + temp_list)
 
         header_row = ["name", "totalTimeHours"]
         data_row = [md['name'], total / 3600.0]
