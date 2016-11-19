@@ -114,7 +114,7 @@ class Problem(gp.GeneralProblem):
         #parser.add_argument('--ic', help='Initial condition', choices=['zero'], default='zero')
         parser.add_argument('-F', '--factor', help='Velocity scale factor', type=float, default=1.0)
         parser.add_argument('--nu', help='kinematic viscosity factor', type=float, default=3.71)
-        parser.add_argument('--itp', help='inflow time profile polynomial', choices=[1, 2], default=2)
+        parser.add_argument('--itp', help='inflow time profile polynomial', type=int, choices=[1, 2], default=2)
 
     def initialize(self, V, Q, PS, D):
         super(Problem, self).initialize(V, Q, PS, D)
