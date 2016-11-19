@@ -15,12 +15,17 @@ while t < end+0.00001:
     rng.append(t)
     t += dt
 
-# for f in [prb.Problem.v_function, prb.Problem.v_function_2]:
-for f in [prb.Problem.v_function_2]:
+label_i=1
+
+for f in [prb.Problem.v_function, prb.Problem.v_function_2]:
+# for f in [prb.Problem.v_function_2]:
     Tvalues = []
     Tx = []
     for t in rng:
         Tvalues.append(f(t))
         Tx.append(t)
-    plt.plot(Tx, Tvalues)
+    plt.plot(Tx, Tvalues, label=str(label_i))
+    label_i += 1
+
+plt.legend()
 plt.show()

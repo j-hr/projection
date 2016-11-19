@@ -1,2 +1,2 @@
 # name nodes cores queue hours what
-TEST_JOB 1 24 qfree 12 main.py real ipcs1 HYK 0.005 0.001 -S only_vel --wss all --onset 0.5 --stab 0.5 --prv1 12 --pav1 4 --precV sor --bcv LAP
+TEST_JOB 1 24 qfree 12 main.py real ipcs1 HYK 0.001 -t 0.005 --itp 1 -S only_vel --wss all --onset 0.5 --stab 0.5 --prv1 12 --pav1 4 --precV sor --bcv LAP

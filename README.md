@@ -17,7 +17,7 @@ The test problem cannot be run in parallel due to the technique of generating an
 ## Basic usage
 The code is operated using command line arguments. Basic structure is:
 
-    python main.py problem_name solver_name mesh total_time time_step
+    python main.py problem_name solver_name mesh time_step
 
 |argument|option/value|explanation|
 |:---|:---|:---|
@@ -27,7 +27,6 @@ The code is operated using command line arguments. Basic structure is:
 | |"direct"|previous solving strategy (Newton method with direct solver)|
 |mesh|"cyl_c1", "cyl_c2" or "cyl_c3"|test problem meshes (gradually increasing quality)|
 | | "HYK", or "HYK3"| real mesh (coarsest or middle quality)|
-|total time|positive float|in seconds, computation will run from 0 to this time|
 |time step|positive float|in seconds|
 
 All parameters are used without quotes. Many optional parameters can be appended.
@@ -38,6 +37,8 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 ### General arguments
 |argument|option/value|explanation|
 |:---|:---|:---|
+|-t|positive float|total time in seconds, computation will run from 0 to this time|
+|-c|positive float|number of flow cycles to compute, used only if -t not specified|
 |-n|any string|name of this run instance|
 |-s|'noSave' (default)|do not save any XDMF files during computation|
 | |'only_vel'|saves only velocity fields|
@@ -61,6 +62,7 @@ In the thesis tests on third, finest real mesh were conducted. This mesh is not 
 ### For "real" problem
 |argument|option/value|explanation|
 |:---|:---|:---|
+|--itp|1 or 2|which inflow time profile to use (use test_time_profile.py or read real.py to view options)|
 |--nu|positive float|kinematic viscosity (default 3.71 mm<sup>2</sup>/s)|
 |-F|positive float|inflow velocity multiplicative factor|
 ### For "womersley_cylinder" problem
