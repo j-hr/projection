@@ -182,15 +182,15 @@ class Problem(gp.GeneralProblem):
 
         a_12 = (-36.0) * (v_M - v_m) / T / T
         a_22 = (-24.0) * (v_M - v_m) / T / T
-        a_32 = 0.5 * (v_M - v_m) / T / T
+        a_32 = 0.75 * (v_M - v_m) / T / T
 
         # tt -= T/2.
         t = tt % T
         # t = tt
         if t < T / 6.0:
-            return v_M + (a_12*(t-(T/6))*(t-(T/6)))
+            return v_M + (a_12*(t-(T/6.))*(t-(T/6.)))
         elif t < T / 3.0:
-            return v_M + (a_22*(t-(T/6))*(t-(T/6)))
+            return v_M + (a_22*(t-(T/6.))*(t-(T/6.)))
         else:
             return v_m + (a_32*(t-T)*(t-T))
 

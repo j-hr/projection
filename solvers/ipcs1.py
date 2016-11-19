@@ -285,7 +285,7 @@ class Solver(gs.GeneralSolver):
                 as_backend_type(A2).set_nullspace(self.null_space)
 
             # apply global options for Krylov solvers
-            solver_options = {'monitor_convergence': False, 'maximum_iterations': 10000, 'nonzero_initial_guess': True}
+            solver_options = {'monitor_convergence': True, 'maximum_iterations': 10000, 'nonzero_initial_guess': True}
             # 'nonzero_initial_guess': True   with  solver.solve(A, u, b) means that
             # Solver will use anything stored in u as an initial guess
             for solver in [self.solver_vel_tent, self.solver_vel_cor, self.solver_rot, self.solver_p] if \
@@ -296,14 +296,9 @@ class Solver(gs.GeneralSolver):
                     except KeyError:
                         info('Invalid option %s for KrylovSolver' % key)
                         return 1
-                #solver.parameters['preconditioner']['structure'] = 'same'  # NT OLD fenics
-                # solver.set_reuse_preconditioner(True)
-                # matrices A2-A4 do not change, so we can reuse preconditioners
 
-            # IMP not possible in 2016 to do it this way. Blechta: PETSc may do it automatically now (it detects changes in matrix)
-            # self.solver_vel_tent.parameters['preconditioner']['structure'] = 'same_nonzero_pattern'
-            # self.solver_vel_tent.set_reuse_preconditioner(false)
-            # matrix A1 changes every time step, so change of preconditioner must be allowed
+            if self.args.solP == 'richardson':
+                self.solver_p.parameters['monitor_convergence'] = False
 
             self.solver_vel_tent.parameters['relative_tolerance'] = 10 ** (-self.args.prv1)
             self.solver_vel_tent.parameters['absolute_tolerance'] = 10 ** (-self.args.pav1)

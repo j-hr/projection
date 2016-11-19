@@ -9,7 +9,7 @@ from ufl import Measure, dx
 
 import itertools, csv
 
-meshName = 'cyl_c2'
+meshName = 'KR1'
 
 # INPUT DATA ============================
 # OLD input data at the end of a file
@@ -21,13 +21,16 @@ meshName = 'cyl_c2'
 # planes can intersect the geometry, as is improbable that any exterior facet will have all vertices in given planes
 # otherwise it would be necessary to check distance from centerpoint
 inflows = [
-    {'number': 2, 'normal': [0.0, 0.0, 1.0], 'center': [0.0, 0.0, -10.0], 'radius': 5.0,
-     'reference_radius': 5.0},
+    {'number': 2, 'normal': [-0.0311807, 0.706763, -0.706763], 'center': [25.2578, 3.92138, 21.1729], 'radius': 1.59853,
+     'reference_radius': 1.59853},
 ]
 outflows = [
-    {'number': 3, 'normal': [0.0, 0.0, 1.0], 'center': [0.0, 0.0, 10.0]},
+    {'number': 3, 'normal': [1.0, 0.0, 0.0], 'center': [9.22937, 17.1521, 8.05915]},
+    {'number': 4, 'normal': [1.0, 0.0, 0.0], 'center': [10.0594, 19.4447, 4.59025]},
+    {'number': 5, 'normal': [-0.8325, 0.545089, -0.0991071], 'center': [40.4424, 13.6561, 5.91043]},
+    {'number': 6, 'normal': [-0.924775, -0.0804152, -0.37192], 'center': [40.0173, 25.4672, 6.58901]},
 ]
-number_list = [2, 3]  # numbers of inflows, outflows, '1' is reserved for walls
+number_list = [2, 3, 4, 5, 6]  # numbers of inflows, outflows, '1' is reserved for walls
 # END OF INPUT ==============================
 mesh = Mesh("meshes/" + meshName + ".xml")
 tdim = mesh.topology().dim()
@@ -166,4 +169,16 @@ outflows = [
 ]
 number_list = [2, 3]  # numbers of inflows, outflows, '1' is reserved for walls
 
+# KR
+inflows = [
+    {'number': 2, 'normal': [-0.0311807, 0.706763, -0.706763], 'center': [25.2578, 3.92138, 21.1729], 'radius': 1.59853,
+     'reference_radius': 1.59853},
+]
+outflows = [
+    {'number': 3, 'normal': [1.0, 0.0, 0.0], 'center': [9.22937, 17.1521, 8.05915]},
+    {'number': 4, 'normal': [1.0, 0.0, 0.0], 'center': [10.0594, 19.4447, 4.59025]},
+    {'number': 5, 'normal': [-0.8325, 0.545089, -0.0991071], 'center': [40.4424, 13.6561, 5.91043]},
+    {'number': 6, 'normal': [-0.924775, -0.0804152, -0.37192], 'center': [40.0173, 25.4672, 6.58901]},
+]
+number_list = [2, 3, 4, 5, 6]  # numbers of inflows, outflows, '1' is reserved for walls
 
